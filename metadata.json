@@ -1,0 +1,10 @@
+{
+  "name": "Cluely Meet - AI Real-Time Translation & Knowledge Base Pitch HUD",
+  "description": "Live AI meeting copilot with real-time speech translation into your preferred language, grounded product knowledge base cue cards, verbatim presentation prompts, and Google Meet integration HUD.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
