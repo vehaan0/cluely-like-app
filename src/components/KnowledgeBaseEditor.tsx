@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { KnowledgeBase, KBDocument, PresentationSlide } from '../types';
+import { DEFAULT_KB_OMNIFLOW } from '../utils/kb-engine';
 import {
   Search,
   Plus,
@@ -11,11 +12,13 @@ import {
   Save,
   X,
   Upload,
-  Layers,
   Sparkles,
   FileSpreadsheet,
   Presentation,
-  Check,
+  RotateCcw,
+  Sliders,
+  FolderPlus,
+  HelpCircle,
 } from 'lucide-react';
 
 interface KnowledgeBaseEditorProps {
@@ -35,10 +38,17 @@ export const KnowledgeBaseEditor: React.FC<KnowledgeBaseEditorProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
   const [isIngestingModalOpen, setIsIngestingModalOpen] = useState(false);
+  const [isMetaModalOpen, setIsMetaModalOpen] = useState(false);
+
+  // Meta editor state
+  const [metaName, setMetaName] = useState(knowledgeBase.name);
+  const [metaTagline, setMetaTagline] = useState(knowledgeBase.tagline);
+  const [metaProductType, setMetaProductType] = useState(knowledgeBase.productType);
 
   // Form states for add/edit
   const [editTitle, setEditTitle] = useState('');
-  const [editCategory, setEditCategory] = useState<KBDocument['category']>('architecture');
+  const [editCategory, setEditCategory] = useState<string>('architecture');
+  const [customCategoryInput, setCustomCategoryInput] = useState('');
   const [editContent, setEditContent] = useState('');
   const [editKeyFacts, setEditKeyFacts] = useState('');
   const [editSlideId, setEditSlideId] = useState('');
@@ -46,14 +56,14 @@ export const KnowledgeBaseEditor: React.FC<KnowledgeBaseEditorProps> = ({
   // Ingestion system state
   const [ingestRawText, setIngestRawText] = useState('');
   const [ingestFileName, setIngestFileName] = useState('');
-  const [ingestCategory, setIngestCategory] = useState<KBDocument['category']>('security');
+  const [ingestCategory, setIngestCategory] = useState<string>('security');
   const [isParsingIngest, setIsParsingIngest] = useState(false);
   const [autoGenSlide, setAutoGenSlide] = useState(true);
 
   const activeDoc = knowledgeBase.documents.find((d) => d.id === activeDocId) || knowledgeBase.documents[0];
 
   const filteredDocs = knowledgeBase.documents.filter((doc) => {
-    const matchesCategory = selectedCategory === 'all' || doc.category === selectedCategory;
+    const matchesCategory = selectedCategory === 'all' || doc.category.toLowerCase() === selectedCategory.toLowerCase();
     const matchesSearch =
       doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       doc.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -81,6 +91,7 @@ export const KnowledgeBaseEditor: React.FC<KnowledgeBaseEditorProps> = ({
   const handleStartEdit = (doc: KBDocument) => {
     setEditTitle(doc.title);
     setEditCategory(doc.category);
+    setCustomCategoryInput('');
     setEditContent(doc.content);
     setEditKeyFacts(doc.keyFacts.join('\n'));
     setEditSlideId(doc.suggestedSlideId || slides[0]?.id || '');
@@ -91,6 +102,7 @@ export const KnowledgeBaseEditor: React.FC<KnowledgeBaseEditorProps> = ({
   const handleStartCreate = () => {
     setEditTitle('');
     setEditCategory('architecture');
+    setCustomCategoryInput('');
     setEditContent('');
     setEditKeyFacts('');
     setEditSlideId(slides[0]?.id || '');
@@ -101,6 +113,8 @@ export const KnowledgeBaseEditor: React.FC<KnowledgeBaseEditorProps> = ({
   const handleSaveDoc = () => {
     if (!editTitle.trim() || !editContent.trim()) return;
 
+    const finalCategory = customCategoryInput.trim() ? customCategoryInput.trim().toLowerCase() : editCategory;
+
     const facts = editKeyFacts
       .split('\n')
       .map((f) => f.trim())
@@ -110,7 +124,7 @@ export const KnowledgeBaseEditor: React.FC<KnowledgeBaseEditorProps> = ({
       const newDoc: KBDocument = {
         id: `doc-${Date.now()}`,
         title: editTitle,
-        category: editCategory,
+        category: finalCategory,
         content: editContent,
         keyFacts: facts.length > 0 ? facts : [editTitle],
         suggestedSlideId: editSlideId,
@@ -126,7 +140,7 @@ export const KnowledgeBaseEditor: React.FC<KnowledgeBaseEditorProps> = ({
           ? {
               ...d,
               title: editTitle,
-              category: editCategory,
+              category: finalCategory,
               content: editContent,
               keyFacts: facts.length > 0 ? facts : d.keyFacts,
               suggestedSlideId: editSlideId,
@@ -140,12 +154,43 @@ export const KnowledgeBaseEditor: React.FC<KnowledgeBaseEditorProps> = ({
   };
 
   const handleDeleteDoc = (docId: string) => {
-    if (knowledgeBase.documents.length <= 1) return;
     const updatedDocs = knowledgeBase.documents.filter((d) => d.id !== docId);
     onUpdateKnowledgeBase({ ...knowledgeBase, documents: updatedDocs });
     if (activeDocId === docId) {
       setActiveDocId(updatedDocs[0]?.id || '');
     }
+  };
+
+  const handleResetToBlank = () => {
+    if (window.confirm('Reset this Knowledge Base to a blank canvas? You can upload your own custom documents.')) {
+      onUpdateKnowledgeBase({
+        id: `kb-${Date.now()}`,
+        name: 'My Custom Product',
+        tagline: 'Custom Grounded Knowledge Base',
+        productType: 'Enterprise Product',
+        documents: [],
+        slides: [],
+      });
+      setActiveDocId('');
+      setIsEditing(false);
+      setIsCreatingNew(false);
+    }
+  };
+
+  const handleReloadSampleTemplate = () => {
+    onUpdateKnowledgeBase(DEFAULT_KB_OMNIFLOW);
+    setActiveDocId(DEFAULT_KB_OMNIFLOW.documents[0].id);
+  };
+
+  const handleSaveMeta = (e: React.FormEvent) => {
+    e.preventDefault();
+    onUpdateKnowledgeBase({
+      ...knowledgeBase,
+      name: metaName.trim() || 'My Product',
+      tagline: metaTagline.trim() || 'Product Knowledge Base',
+      productType: metaProductType.trim() || 'SaaS',
+    });
+    setIsMetaModalOpen(false);
   };
 
   // Multi-format file upload handler
@@ -269,32 +314,32 @@ Slide 2: Enterprise Integration Ecosystem
         }
       }
     } catch (e) {
-      console.warn('Backend ingestion failed, using local parser:', e);
+      console.warn('Ingestion failed, adding raw markdown locally:', e);
     }
 
-    // Local extraction fallback
-    const lines = ingestRawText.split('\n').map((l) => l.trim()).filter(Boolean);
-    const title =
-      lines[0]?.replace(/^#+\s*/, '') ||
-      ingestFileName.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ') ||
-      'Ingested Product Specification';
+    // Fallback local ingestion
+    const lines = ingestRawText.split('\n').filter((l) => l.trim().length > 0);
+    const title = ingestFileName || lines[0]?.replace(/[#*`]/g, '').trim() || 'Uploaded Knowledge Document';
     const keyFacts = lines
-      .filter((l) => /^[-*•]|\d|%|\$|SLA|SOC|API|BAA|AES|VPC/i.test(l))
-      .slice(0, 4)
-      .map((l) => l.replace(/^[-*•]\s*/, ''));
+      .filter((l) => l.startsWith('•') || l.startsWith('-') || l.startsWith('*') || l.includes(':'))
+      .map((l) => l.replace(/^[•\-*]\s*/, '').trim())
+      .slice(0, 5);
 
     const newDoc: KBDocument = {
-      id: `doc-ingest-${Date.now()}`,
+      id: `doc-${Date.now()}`,
       title,
       category: ingestCategory,
       content: ingestRawText,
-      keyFacts: keyFacts.length > 0 ? keyFacts : [title, 'Verified knowledge specification'],
+      keyFacts: keyFacts.length > 0 ? keyFacts : [lines[0]?.slice(0, 100) || title],
+      suggestedSlideId: slides[0]?.id || 'slide-1',
       lastUpdated: new Date().toISOString().split('T')[0],
-      suggestedSlideId: slides[0]?.id,
     };
 
-    const updated = [newDoc, ...knowledgeBase.documents];
-    onUpdateKnowledgeBase({ ...knowledgeBase, documents: updated });
+    onUpdateKnowledgeBase({
+      ...knowledgeBase,
+      documents: [newDoc, ...knowledgeBase.documents],
+    });
+
     setActiveDocId(newDoc.id);
     setIsIngestingModalOpen(false);
     setIngestRawText('');
@@ -302,25 +347,60 @@ Slide 2: Enterprise Integration Ecosystem
     setIsParsingIngest(false);
   };
 
+  const categories = Array.from(
+    new Set(['all', 'pricing', 'security', 'architecture', 'integration', 'competitors', ...knowledgeBase.documents.map((d) => d.category)])
+  );
+
   return (
     <div className="max-w-[1600px] w-full mx-auto px-4 lg:px-8 py-6 pb-24 md:pb-8 flex flex-col gap-6">
       {/* Top Banner / Knowledge Base Overview */}
       <div className="glass-panel rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400 font-semibold tracking-wide uppercase">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-amber-600 dark:text-amber-400 font-semibold tracking-wide uppercase">
             <BookOpen className="w-4 h-4" />
             <span>Product Knowledge Base Ingestion System</span>
             <span className="text-slate-400">·</span>
             <span className="text-slate-600 dark:text-slate-400 normal-case font-mono">{knowledgeBase.documents.length} verified documents</span>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight mt-1">{knowledgeBase.name}</h1>
+          <div className="flex items-center gap-2 mt-1">
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">{knowledgeBase.name}</h1>
+            <button
+              onClick={() => {
+                setMetaName(knowledgeBase.name);
+                setMetaTagline(knowledgeBase.tagline);
+                setMetaProductType(knowledgeBase.productType);
+                setIsMetaModalOpen(true);
+              }}
+              className="p-1 text-slate-400 hover:text-amber-500 rounded-lg hover:bg-slate-100 dark:hover:bg-white/[0.05] transition-colors cursor-pointer"
+              title="Edit Knowledge Base Name & Profile"
+            >
+              <Edit3 className="w-4 h-4" />
+            </button>
+          </div>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">{knowledgeBase.tagline}</p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={handleResetToBlank}
+            className="px-3 py-2 bg-slate-100 dark:bg-white/[0.05] hover:bg-slate-200 dark:hover:bg-white/[0.1] text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl transition-all border border-slate-200 dark:border-white/10 cursor-pointer"
+            title="Start from scratch with zero sample documents"
+          >
+            <span>Start Blank KB</span>
+          </button>
+
+          <button
+            onClick={handleReloadSampleTemplate}
+            className="px-3 py-2 bg-slate-100 dark:bg-white/[0.05] hover:bg-slate-200 dark:hover:bg-white/[0.1] text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl transition-all border border-slate-200 dark:border-white/10 cursor-pointer flex items-center gap-1.5"
+            title="Load default template documents"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-amber-500" />
+            <span>Load Sample Preset</span>
+          </button>
+
           <button
             onClick={() => setIsIngestingModalOpen(true)}
-            className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white dark:bg-white/[0.08] dark:hover:bg-white/[0.15] dark:text-white font-semibold text-xs rounded-xl transition-all flex items-center gap-2 border border-slate-700 dark:border-white/10 shadow-sm cursor-pointer"
+            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white dark:bg-white/[0.08] dark:hover:bg-white/[0.15] dark:text-white font-semibold text-xs rounded-xl transition-all flex items-center gap-2 border border-slate-700 dark:border-white/10 shadow-sm cursor-pointer"
           >
             <Upload className="w-4 h-4 text-amber-500 dark:text-amber-400" />
             <span>Ingest Document (PDF, Word, Sheet, PPT)</span>
@@ -328,13 +408,84 @@ Slide 2: Enterprise Integration Ecosystem
 
           <button
             onClick={handleStartCreate}
-            className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs rounded-xl transition-all flex items-center gap-2 shadow-sm cursor-pointer"
+            className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs rounded-xl transition-all flex items-center gap-2 shadow-sm cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Add Manual Spec</span>
           </button>
         </div>
       </div>
+
+      {/* Edit Knowledge Base Profile Modal */}
+      {isMetaModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#0c0e17] border border-slate-200 dark:border-white/10 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10">
+              <div className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+                <Sliders className="w-4 h-4 text-amber-500" />
+                <span>Customize Knowledge Base Details</span>
+              </div>
+              <button
+                onClick={() => setIsMetaModalOpen(false)}
+                className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveMeta} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Company / Product Name</label>
+                <input
+                  type="text"
+                  value={metaName}
+                  onChange={(e) => setMetaName(e.target.value)}
+                  placeholder="e.g. Acme Cloud or Pulse Health"
+                  className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Tagline / Mission</label>
+                <input
+                  type="text"
+                  value={metaTagline}
+                  onChange={(e) => setMetaTagline(e.target.value)}
+                  placeholder="e.g. Autonomous Workflow Engine"
+                  className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Product Category / Industry</label>
+                <input
+                  type="text"
+                  value={metaProductType}
+                  onChange={(e) => setMetaProductType(e.target.value)}
+                  placeholder="e.g. Enterprise SaaS, HealthTech, CyberSecurity"
+                  className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setIsMetaModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-white/[0.05] text-slate-700 dark:text-slate-300 text-xs font-medium cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-bold cursor-pointer"
+                >
+                  Save Profile
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Multi-Format Ingestion Modal */}
       {isIngestingModalOpen && (
@@ -427,7 +578,7 @@ Slide 2: Enterprise Integration Ecosystem
                 <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Target Category</label>
                 <select
                   value={ingestCategory}
-                  onChange={(e) => setIngestCategory(e.target.value as any)}
+                  onChange={(e) => setIngestCategory(e.target.value)}
                   className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
                 >
                   <option value="security">Security & Compliance</option>
@@ -436,6 +587,7 @@ Slide 2: Enterprise Integration Ecosystem
                   <option value="integration">Integrations & Connectors</option>
                   <option value="competitors">Competitor Battlecards</option>
                   <option value="faq">FAQ</option>
+                  <option value="overview">Overview / General</option>
                 </select>
               </div>
 
@@ -505,12 +657,12 @@ Slide 2: Enterprise Integration Ecosystem
 
           {/* Category Filter Tabs */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
-            {['all', 'pricing', 'security', 'architecture', 'integration', 'competitors'].map((cat) => (
+            {categories.map((cat) => (
               <button
                 key={cat}
                 onClick={() => setSelectedCategory(cat)}
                 className={`px-3 py-1.5 rounded-lg capitalize whitespace-nowrap transition-colors cursor-pointer ${
-                  selectedCategory === cat
+                  selectedCategory.toLowerCase() === cat.toLowerCase()
                     ? 'bg-amber-500/20 text-slate-900 dark:text-amber-300 font-bold border border-amber-500/40 shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-white/[0.03] border border-slate-200 dark:border-white/[0.06]'
                 }`}
@@ -570,8 +722,21 @@ Slide 2: Enterprise Integration Ecosystem
             })}
 
             {filteredDocs.length === 0 && (
-              <div className="p-8 text-center bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-xl text-slate-500 text-xs">
-                No documents found matching "{searchQuery}".
+              <div className="p-8 text-center bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-2xl text-slate-500 text-xs space-y-3">
+                <FolderPlus className="w-8 h-8 text-amber-500 mx-auto" />
+                <div className="font-bold text-slate-900 dark:text-white">No documents found</div>
+                <p className="max-w-xs mx-auto text-slate-500 dark:text-slate-400">
+                  {knowledgeBase.documents.length === 0
+                    ? 'This Knowledge Base is blank. Ingest your company documents (PDF, Word, Sheet, PPT) or add a manual spec.'
+                    : `No documents matching "${searchQuery}".`}
+                </p>
+                <button
+                  onClick={handleStartCreate}
+                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold rounded-xl text-xs cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Create First Document</span>
+                </button>
               </div>
             )}
           </div>
@@ -613,7 +778,7 @@ Slide 2: Enterprise Integration Ecosystem
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Category</label>
                   <select
                     value={editCategory}
-                    onChange={(e) => setEditCategory(e.target.value as any)}
+                    onChange={(e) => setEditCategory(e.target.value)}
                     className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
                   >
                     <option value="architecture">Architecture</option>
@@ -622,7 +787,17 @@ Slide 2: Enterprise Integration Ecosystem
                     <option value="integration">Integration</option>
                     <option value="competitors">Competitors</option>
                     <option value="faq">FAQ</option>
+                    <option value="custom">Other / Custom</option>
                   </select>
+                  {editCategory === 'custom' && (
+                    <input
+                      type="text"
+                      placeholder="Type custom category..."
+                      value={customCategoryInput}
+                      onChange={(e) => setCustomCategoryInput(e.target.value)}
+                      className="mt-1.5 w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                    />
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Suggested Presentation Slide</label>
@@ -631,6 +806,7 @@ Slide 2: Enterprise Integration Ecosystem
                     onChange={(e) => setEditSlideId(e.target.value)}
                     className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
                   >
+                    <option value="">No linked slide</option>
                     {slides.map((s) => (
                       <option key={s.id} value={s.id}>
                         Slide {s.number}: {s.title.slice(0, 30)}...
@@ -710,8 +886,7 @@ Slide 2: Enterprise Integration Ecosystem
                   </button>
                   <button
                     onClick={() => handleDeleteDoc(activeDoc.id)}
-                    disabled={knowledgeBase.documents.length <= 1}
-                    className="p-1.5 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-slate-100 dark:hover:bg-white/[0.05] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    className="p-1.5 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-slate-100 dark:hover:bg-white/[0.05] cursor-pointer"
                     title="Delete document"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -744,7 +919,15 @@ Slide 2: Enterprise Integration Ecosystem
                 </div>
               </div>
             </div>
-          ) : null}
+          ) : (
+            <div className="py-24 text-center text-slate-400 dark:text-slate-500 text-xs space-y-3">
+              <BookOpen className="w-10 h-10 mx-auto text-amber-500/40" />
+              <div className="text-sm font-bold text-slate-800 dark:text-slate-200">Knowledge Base is Empty</div>
+              <p className="max-w-xs mx-auto">
+                Ingest PDF, Word, Sheet, or PPT documents, or click "Add Manual Spec" to start building your knowledge base.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>

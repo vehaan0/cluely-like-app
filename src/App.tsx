@@ -29,16 +29,46 @@ import { Radio, Wand2, BookOpen, Cpu } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('hud');
-  const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBase>(DEFAULT_KB_OMNIFLOW);
+
+  // Dynamic Knowledge Base state persisted in localStorage
+  const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBase>(() => {
+    const saved = localStorage.getItem('sam_kb');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return DEFAULT_KB_OMNIFLOW;
+  });
+
+  const handleUpdateKnowledgeBase = (kb: KnowledgeBase) => {
+    setKnowledgeBase(kb);
+    localStorage.setItem('sam_kb', JSON.stringify(kb));
+  };
+
   const [preferredLanguage, setPreferredLanguage] = useState<SupportedLanguage>(SUPPORTED_LANGUAGES[0]); // English
-  const [currentScenario, setCurrentScenario] = useState<MeetingScenario>(MEETING_SCENARIOS[0]); // Tokyo
+
+  // Dynamic Scenarios persisted in localStorage
+  const [scenarios, setScenarios] = useState<MeetingScenario[]>(() => {
+    const saved = localStorage.getItem('sam_scenarios');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return MEETING_SCENARIOS;
+  });
+
+  const [currentScenario, setCurrentScenario] = useState<MeetingScenario>(() => scenarios[0] || MEETING_SCENARIOS[0]);
   const [scenarioStepIndex, setScenarioStepIndex] = useState(0);
 
   const [isListening, setIsListening] = useState(true);
   const [isSimulatingSpeaker, setIsSimulatingSpeaker] = useState(false);
   const [isLoadingAi, setIsLoadingAi] = useState(false);
 
-  const [activeSlideId, setActiveSlideId] = useState<string>(DEFAULT_KB_OMNIFLOW.slides[0].id);
+  const [activeSlideId, setActiveSlideId] = useState<string>(
+    knowledgeBase.slides[0]?.id || DEFAULT_KB_OMNIFLOW.slides[0].id
+  );
   const [selectedSlideForView, setSelectedSlideForView] = useState<PresentationSlide | null>(null);
 
   // Theme management: default to light (Parakeet AI / Cluely clean porcelain)
@@ -152,13 +182,13 @@ export default function App() {
             },
             timingCue: data.timingCue || {
               whenToSpeak: 'Wait 1.2s until speaker concludes before responding.',
-              conversationPhase: 'Discovery',
-              urgencyLevel: 'immediate',
+              conversationPhase: 'discovery',
+              urgencyLevel: 'medium',
             },
             followUpQuestion: data.followUpQuestion || '',
             talkingPoints: data.keyTalkingPoints || [],
-            relevantSlideId: data.relevantSlideId || knowledgeBase.slides[0].id,
-            relevantSlideTitle: data.relevantSlideTitle || knowledgeBase.slides[0].title,
+            relevantSlideId: data.relevantSlideId || knowledgeBase.slides[0]?.id || 'slide-1',
+            relevantSlideTitle: data.relevantSlideTitle || knowledgeBase.slides[0]?.title || 'Overview',
             objectionDefuser: data.objectionDefuser || '',
             groundedQuotes: data.groundedQuotes || [],
             confidence: 98,
@@ -172,7 +202,7 @@ export default function App() {
           return newCueCard;
         }
       } catch (err) {
-        console.warn('Backend API assist call failed, using high-speed local engine:', err);
+        console.warn('Backend API assist call failed, using dynamic local engine:', err);
       } finally {
         setIsLoadingAi(false);
       }
@@ -187,8 +217,9 @@ export default function App() {
 
   // Trigger dialogue step in scenario
   const handleScenarioStep = useCallback(
-    async (stepIdx: number, scenario: MeetingScenario) => {
-      const step = scenario.dialogueSteps[stepIdx % scenario.dialogueSteps.length];
+    async (stepIdx: number, scenarioToPlay: MeetingScenario) => {
+      if (!scenarioToPlay.dialogueSteps || scenarioToPlay.dialogueSteps.length === 0) return;
+      const step = scenarioToPlay.dialogueSteps[stepIdx % scenarioToPlay.dialogueSteps.length];
       if (!step) return;
 
       setIsSimulatingSpeaker(true);
@@ -207,7 +238,7 @@ export default function App() {
       setCurrentSubtitle({
         original: step.speakerText,
         translated,
-        speaker: scenario.counterpartyName,
+        speaker: scenarioToPlay.counterpartyName,
       });
 
       // Generate Copilot Cue Card
@@ -216,8 +247,8 @@ export default function App() {
       // Add to transcript log
       const newTranscript: TranscriptItem = {
         id: `tr-${Date.now()}`,
-        speaker: scenario.counterpartyName,
-        speakerRole: scenario.counterpartyTitle,
+        speaker: scenarioToPlay.counterpartyName,
+        speakerRole: scenarioToPlay.counterpartyTitle,
         originalText: step.speakerText,
         sourceLanguage: detectedLang.name,
         translatedText: translated,
@@ -252,6 +283,74 @@ export default function App() {
     handleScenarioStep(nextIdx, currentScenario);
   };
 
+  const handleAddCustomScenario = (newSc: MeetingScenario) => {
+    setScenarios((prev) => {
+      const updated = [newSc, ...prev];
+      localStorage.setItem('sam_scenarios', JSON.stringify(updated));
+      return updated;
+    });
+    setCurrentScenario(newSc);
+    setScenarioStepIndex(0);
+    handleScenarioStep(0, newSc);
+  };
+
+  // Direct foreign speech test handler (supports arbitrary sentences in any language)
+  const handleDirectForeignSpeech = useCallback(
+    async (foreignText: string, speakerName: string = 'Counterparty') => {
+      setIsLoadingAi(true);
+      try {
+        const detected = identifyLanguage(foreignText);
+        const transRes = await fetch('/api/copilot/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: foreignText,
+            targetLanguage: preferredLanguage.name,
+            providerConfig,
+          }),
+        });
+
+        let translated = foreignText;
+        let detectedSource = detected.name;
+        if (transRes.ok) {
+          const transData = await transRes.json();
+          translated = transData.translatedText || foreignText;
+          detectedSource = transData.sourceLanguage || detected.name;
+        } else {
+          translated = getFastTranslation(foreignText, preferredLanguage.code, preferredLanguage.name);
+        }
+
+        setCurrentSubtitle({
+          original: foreignText,
+          translated,
+          speaker: speakerName,
+        });
+
+        const cueCard = await requestCopilotAssistance(translated, detectedSource);
+
+        const newTranscript: TranscriptItem = {
+          id: `tr-${Date.now()}`,
+          speaker: speakerName,
+          speakerRole: 'Participant',
+          originalText: foreignText,
+          sourceLanguage: detectedSource,
+          translatedText: translated,
+          targetLanguage: preferredLanguage.name,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isUser: false,
+          cueCard,
+        };
+
+        setTranscripts((prev) => [newTranscript, ...prev]);
+      } catch (err) {
+        console.warn('Direct speech processing error:', err);
+      } finally {
+        setIsLoadingAi(false);
+      }
+    },
+    [preferredLanguage, providerConfig, requestCopilotAssistance]
+  );
+
   // User asks a quick query or clicks quick prompt
   const handleAskCopilot = async (query: string) => {
     const userTranscript: TranscriptItem = {
@@ -265,15 +364,20 @@ export default function App() {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isUser: true,
     };
+
     setTranscripts((prev) => [userTranscript, ...prev]);
-    await requestCopilotAssistance(query);
+
+    // Request Copilot guidance
+    await requestCopilotAssistance(query, preferredLanguage.name);
   };
 
-  // Web Speech API for real microphone capture
+  // Microphone toggle with Web Speech Recognition
   const handleToggleListening = () => {
     if (isListening) {
       if (speechRecognitionRef.current) {
-        speechRecognitionRef.current.stop();
+        try {
+          speechRecognitionRef.current.stop();
+        } catch {}
       }
       setIsListening(false);
       return;
@@ -385,17 +489,21 @@ export default function App() {
               onClearTranscripts={() => setTranscripts([])}
               currentSubtitle={currentSubtitle}
               scenario={currentScenario}
+              scenarios={scenarios}
               onSelectScenario={(sc) => {
                 setCurrentScenario(sc);
                 setScenarioStepIndex(0);
                 handleScenarioStep(0, sc);
               }}
               onTriggerScenarioStep={handleTriggerNextQuestion}
+              onAddCustomScenario={handleAddCustomScenario}
+              onDirectForeignSpeech={handleDirectForeignSpeech}
               isSimulatingSpeaker={isSimulatingSpeaker}
               providerConfig={providerConfig}
               isLoadingAi={isLoadingAi}
               isQuotaExceeded={isQuotaExceeded}
               onSwitchToProviders={() => setActiveTab('providers')}
+              knowledgeBase={knowledgeBase}
             />
           )}
 
@@ -404,11 +512,11 @@ export default function App() {
             <PresentationGeneratorView
               knowledgeBase={knowledgeBase}
               onApplyGeneratedSlides={(newSlides) => {
-                setKnowledgeBase((prev) => ({ ...prev, slides: newSlides }));
+                handleUpdateKnowledgeBase({ ...knowledgeBase, slides: newSlides });
                 setActiveSlideId(newSlides[0]?.id || '');
               }}
               onLaunchMeetingWithDeck={(newSlides) => {
-                setKnowledgeBase((prev) => ({ ...prev, slides: newSlides }));
+                handleUpdateKnowledgeBase({ ...knowledgeBase, slides: newSlides });
                 setActiveSlideId(newSlides[0]?.id || '');
                 setActiveTab('hud');
               }}
@@ -419,7 +527,7 @@ export default function App() {
           {activeTab === 'kb' && (
             <KnowledgeBaseEditor
               knowledgeBase={knowledgeBase}
-              onUpdateKnowledgeBase={setKnowledgeBase}
+              onUpdateKnowledgeBase={handleUpdateKnowledgeBase}
               slides={knowledgeBase.slides}
             />
           )}
@@ -449,68 +557,16 @@ export default function App() {
                   <PresentationDeck
                     slides={knowledgeBase.slides}
                     activeSlideId={selectedSlideForView.id}
-                    onSelectSlide={(id) => {
-                      const s = knowledgeBase.slides.find((sl) => sl.id === id);
-                      if (s) setSelectedSlideForView(s);
+                    onSelectSlide={(slideId) => {
+                      const found = knowledgeBase.slides.find((s) => s.id === slideId);
+                      if (found) setSelectedSlideForView(found);
                     }}
-                    compact={false}
                   />
                 </div>
               </div>
             </div>
           )}
         </main>
-
-        {/* Mobile Persistent Bottom Tab Bar (<768px touch-optimized, min 48px touch target) */}
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-[#07080c]/95 border-t border-slate-200 dark:border-white/10 backdrop-blur-xl px-2 py-1.5 flex items-center justify-around shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-          <button
-            onClick={() => setActiveTab('hud')}
-            className={`flex flex-col items-center justify-center min-w-[64px] min-h-[48px] rounded-xl text-[10px] font-semibold transition-colors ${
-              activeTab === 'hud'
-                ? 'text-amber-600 dark:text-amber-400'
-                : 'text-slate-500 dark:text-slate-400'
-            }`}
-          >
-            <Radio className={`w-5 h-5 mb-0.5 ${activeTab === 'hud' ? 'animate-pulse' : ''}`} />
-            <span>Live HUD</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('generator')}
-            className={`flex flex-col items-center justify-center min-w-[64px] min-h-[48px] rounded-xl text-[10px] font-semibold transition-colors ${
-              activeTab === 'generator'
-                ? 'text-amber-600 dark:text-amber-400'
-                : 'text-slate-500 dark:text-slate-400'
-            }`}
-          >
-            <Wand2 className="w-5 h-5 mb-0.5" />
-            <span>Deck Gen</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('kb')}
-            className={`flex flex-col items-center justify-center min-w-[64px] min-h-[48px] rounded-xl text-[10px] font-semibold transition-colors ${
-              activeTab === 'kb'
-                ? 'text-amber-600 dark:text-amber-400'
-                : 'text-slate-500 dark:text-slate-400'
-            }`}
-          >
-            <BookOpen className="w-5 h-5 mb-0.5" />
-            <span>Docs KB</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('providers')}
-            className={`flex flex-col items-center justify-center min-w-[64px] min-h-[48px] rounded-xl text-[10px] font-semibold transition-colors ${
-              activeTab === 'providers'
-                ? 'text-amber-600 dark:text-amber-400'
-                : 'text-slate-500 dark:text-slate-400'
-            }`}
-          >
-            <Cpu className="w-5 h-5 mb-0.5" />
-            <span>AI Brain</span>
-          </button>
-        </nav>
       </div>
     </div>
   );

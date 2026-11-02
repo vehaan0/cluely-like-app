@@ -4,7 +4,7 @@ export interface PresentationConfig {
   topic: string;
   durationMinutes: number; // e.g. 5, 15, 30
   targetAudience: 'ciso' | 'cfo' | 'cto' | 'executive' | 'general';
-  focusCategories: Array<'architecture' | 'pricing' | 'security' | 'integration' | 'competitors' | 'faq'>;
+  focusCategories: string[];
 }
 
 export interface GeneratedPresentation {

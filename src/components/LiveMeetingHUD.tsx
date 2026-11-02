@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   CopilotCueCard,
   TranscriptItem,
@@ -6,10 +6,10 @@ import {
   HudMode,
   MeetingScenario,
   AIProviderConfig,
+  KnowledgeBase,
 } from '../types';
 import {
   SupportedLanguage,
-  MEETING_SCENARIOS,
   identifyLanguage,
 } from '../utils/translation-engine';
 import {
@@ -34,6 +34,10 @@ import {
   MessageSquare,
   Activity,
   Layers,
+  Plus,
+  UserPlus,
+  Send,
+  X,
 } from 'lucide-react';
 
 interface LiveMeetingHUDProps {
@@ -50,13 +54,17 @@ interface LiveMeetingHUDProps {
   onClearTranscripts: () => void;
   currentSubtitle: { original: string; translated: string; speaker: string } | null;
   scenario: MeetingScenario;
+  scenarios: MeetingScenario[];
   onSelectScenario: (sc: MeetingScenario) => void;
   onTriggerScenarioStep: () => void;
+  onAddCustomScenario: (sc: MeetingScenario) => void;
+  onDirectForeignSpeech: (foreignText: string, speakerName?: string) => void;
   isSimulatingSpeaker: boolean;
   providerConfig: AIProviderConfig;
   isLoadingAi: boolean;
   isQuotaExceeded?: boolean;
   onSwitchToProviders?: () => void;
+  knowledgeBase: KnowledgeBase;
 }
 
 export const LiveMeetingHUD: React.FC<LiveMeetingHUDProps> = ({
@@ -72,12 +80,16 @@ export const LiveMeetingHUD: React.FC<LiveMeetingHUDProps> = ({
   onClearTranscripts,
   currentSubtitle,
   scenario,
+  scenarios,
   onSelectScenario,
   onTriggerScenarioStep,
+  onAddCustomScenario,
+  onDirectForeignSpeech,
   isSimulatingSpeaker,
   isLoadingAi,
   isQuotaExceeded = false,
   onSwitchToProviders,
+  knowledgeBase,
 }) => {
   const [hudMode, setHudMode] = useState<HudMode>('docked-full');
   const [mobileTab, setMobileTab] = useState<'stream' | 'cuecard'>('cuecard');
@@ -85,6 +97,19 @@ export const LiveMeetingHUD: React.FC<LiveMeetingHUDProps> = ({
   const [copiedQuestion, setCopiedQuestion] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [manualQuery, setManualQuery] = useState('');
+
+  // Direct foreign speech testing input
+  const [foreignInputText, setForeignInputText] = useState('');
+  const [foreignSpeakerName, setForeignSpeakerName] = useState('Counterparty');
+
+  // Custom Scenario Modal state
+  const [isCustomScenarioModalOpen, setIsCustomScenarioModalOpen] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const [customTitle, setCustomTitle] = useState('Senior Decision Maker');
+  const [customCompany, setCustomCompany] = useState('Global Enterprise');
+  const [customLang, setCustomLang] = useState('Japanese');
+  const [customLangCode, setCustomLangCode] = useState('ja');
+  const [customSpeech, setCustomSpeech] = useState('');
 
   const detectedSpeakerLang = currentSubtitle
     ? identifyLanguage(currentSubtitle.original)
@@ -123,12 +148,65 @@ export const LiveMeetingHUD: React.FC<LiveMeetingHUDProps> = ({
     setManualQuery('');
   };
 
-  const quickPrompts = [
-    'How do we handle GDPR & EU data?',
-    'What is our uptime SLA guarantee?',
-    'Compare our pricing vs Workato',
-    'Explain our 30-day POC credit',
-  ];
+  const handleDirectForeignSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!foreignInputText.trim()) return;
+    onDirectForeignSpeech(foreignInputText.trim(), foreignSpeakerName.trim() || 'Counterparty');
+    setForeignInputText('');
+  };
+
+  const handleCreateCustomScenario = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customName.trim() || !customSpeech.trim()) return;
+
+    const detected = identifyLanguage(customSpeech);
+    const newSc: MeetingScenario = {
+      id: `custom-sc-${Date.now()}`,
+      title: `${customCompany}: ${customName}`,
+      counterpartyName: customName.trim(),
+      counterpartyTitle: customTitle.trim(),
+      counterpartyCompany: customCompany.trim(),
+      counterpartyLocation: 'Client HQ',
+      nativeLanguage: customLang || detected.name,
+      nativeLanguageCode: customLangCode || detected.code,
+      avatarSeed: customName.trim(),
+      isCustom: true,
+      dialogueSteps: [
+        {
+          speakerText: customSpeech.trim(),
+          englishTranslation: customSpeech.trim(),
+          expectedTopic: 'Custom evaluation inquiry',
+          delayMs: 3000,
+        },
+      ],
+    };
+
+    onAddCustomScenario(newSc);
+    onSelectScenario(newSc);
+    setIsCustomScenarioModalOpen(false);
+    setCustomName('');
+    setCustomSpeech('');
+  };
+
+  // Dynamically derive quick prompts from the loaded knowledge base documents
+  const dynamicQuickPrompts = useMemo(() => {
+    const list: string[] = [];
+    if (knowledgeBase.documents && knowledgeBase.documents.length > 0) {
+      knowledgeBase.documents.forEach((d) => {
+        list.push(`How do we handle ${d.title}?`);
+        if (d.keyFacts && d.keyFacts[0]) {
+          list.push(d.keyFacts[0].slice(0, 42));
+        }
+      });
+    }
+    if (list.length === 0) {
+      list.push(`How does ${knowledgeBase.name} ensure enterprise reliability?`);
+      list.push(`What is our deployment architecture?`);
+      list.push(`Explain our pricing & ROI model`);
+      list.push(`What compliance certifications do we hold?`);
+    }
+    return list.slice(0, 6);
+  }, [knowledgeBase]);
 
   return (
     <div className="flex-1 p-3 sm:p-4 lg:p-6 max-w-[1600px] w-full mx-auto flex flex-col gap-4 sm:gap-5 pb-24 md:pb-8">
@@ -139,7 +217,7 @@ export const LiveMeetingHUD: React.FC<LiveMeetingHUDProps> = ({
             <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse shadow-[0_0_10px_#f59e0b]" />
             <span className="font-bold tracking-wide uppercase text-[11px]">SAM Offline Grounded Engine:</span>
             <span className="text-slate-600 dark:text-slate-300">
-              Cloud AI quota reached (429). SAM is seamlessly synthesizing grounded answers and translations with sub-10ms latency.
+              Cloud AI quota reached (429). SAM is seamlessly synthesizing grounded answers and translations from your active Knowledge Base with sub-10ms latency.
             </span>
           </div>
           {onSwitchToProviders && (
@@ -147,7 +225,7 @@ export const LiveMeetingHUD: React.FC<LiveMeetingHUDProps> = ({
               onClick={onSwitchToProviders}
               className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-lg transition-all text-xs shadow-sm shrink-0 cursor-pointer"
             >
-              Switch AI Brain / Connect Ollama
+              Switch AI Brain / Enter Custom Key
             </button>
           )}
         </div>
@@ -239,7 +317,7 @@ export const LiveMeetingHUD: React.FC<LiveMeetingHUDProps> = ({
           <div className="flex flex-wrap items-center gap-2.5 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-200/80 dark:border-white/[0.06]">
             {/* Persona Segmented Buttons */}
             <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-black/40 border border-slate-200 dark:border-white/[0.08] rounded-xl overflow-x-auto max-w-full">
-              {MEETING_SCENARIOS.map((sc) => {
+              {scenarios.map((sc) => {
                 const isSelected = sc.id === scenario.id;
                 return (
                   <button
@@ -256,6 +334,15 @@ export const LiveMeetingHUD: React.FC<LiveMeetingHUDProps> = ({
                   </button>
                 );
               })}
+
+              <button
+                onClick={() => setIsCustomScenarioModalOpen(true)}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                title="Add custom counterparty persona"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Persona</span>
+              </button>
             </div>
 
             {/* Simulate Next Question Trigger */}
@@ -270,6 +357,116 @@ export const LiveMeetingHUD: React.FC<LiveMeetingHUDProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Custom Counterparty Scenario Modal */}
+      {isCustomScenarioModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#0c0e17] border border-slate-200 dark:border-white/10 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10">
+              <div className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+                <UserPlus className="w-4 h-4 text-amber-500" />
+                <span>Add Custom Counterparty Persona</span>
+              </div>
+              <button
+                onClick={() => setIsCustomScenarioModalOpen(false)}
+                className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateCustomScenario} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Speaker Full Name</label>
+                <input
+                  type="text"
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  placeholder="e.g. Jean-Luc Dupont or Sarah Miller"
+                  required
+                  className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Company</label>
+                  <input
+                    type="text"
+                    value={customCompany}
+                    onChange={(e) => setCustomCompany(e.target.value)}
+                    placeholder="e.g. BNP Paribas"
+                    className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Job Title</label>
+                  <input
+                    type="text"
+                    value={customTitle}
+                    onChange={(e) => setCustomTitle(e.target.value)}
+                    placeholder="e.g. CTO / Head of Infra"
+                    className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Native Language</label>
+                  <input
+                    type="text"
+                    value={customLang}
+                    onChange={(e) => setCustomLang(e.target.value)}
+                    placeholder="e.g. French, German, Spanish"
+                    className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Language Code</label>
+                  <input
+                    type="text"
+                    value={customLangCode}
+                    onChange={(e) => setCustomLangCode(e.target.value)}
+                    placeholder="e.g. fr, de, es, ja"
+                    className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Their Speech / Objection Question
+                </label>
+                <textarea
+                  rows={3}
+                  value={customSpeech}
+                  onChange={(e) => setCustomSpeech(e.target.value)}
+                  placeholder="Type their foreign sentence or meeting question..."
+                  required
+                  className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl p-3 text-xs text-slate-900 dark:text-white font-mono leading-relaxed focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setIsCustomScenarioModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-white/[0.05] text-slate-700 dark:text-slate-300 text-xs font-medium cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-bold cursor-pointer"
+                >
+                  Create & Select Persona
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Mobile-Only Segmented View Switcher (<1024px) */}
       <div className="lg:hidden flex items-center p-1 bg-slate-100 dark:bg-white/[0.05] border border-slate-200 dark:border-white/10 rounded-xl">
@@ -320,77 +517,107 @@ export const LiveMeetingHUD: React.FC<LiveMeetingHUDProps> = ({
                 </span>
               </div>
 
-              {/* Source Speech */}
-              <div className="text-xs text-slate-500 dark:text-slate-400 italic mb-2 font-serif">
-                "{currentSubtitle.original}"
-              </div>
-
-              {/* Target Translation */}
-              <div className="text-sm md:text-base font-semibold text-slate-900 dark:text-white leading-snug tracking-tight">
-                "{currentSubtitle.translated}"
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-slate-900 dark:text-slate-100 leading-relaxed font-sans">
+                  "{currentSubtitle.original}"
+                </p>
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-slate-900 dark:text-white font-semibold text-xs leading-relaxed flex items-start gap-2">
+                  <span className="text-amber-600 dark:text-amber-400 font-bold shrink-0">Translated:</span>
+                  <span>{currentSubtitle.translated}</span>
+                </div>
               </div>
             </div>
           )}
 
-          {/* Real-time Subtitles Feed */}
-          <div className="glass-panel rounded-2xl p-4 sm:p-5 flex flex-col flex-1 min-h-[460px] max-h-[580px]">
-            <div className="flex items-center justify-between pb-3.5 border-b border-slate-200/80 dark:border-white/[0.08] text-xs">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-900 dark:text-white text-sm">Live Bilingual Stream</span>
-                <span className="text-slate-500 dark:text-slate-400 text-xs font-mono">({transcripts.length})</span>
-              </div>
+          {/* Direct Speech / Meeting Audio Tester Box */}
+          <div className="glass-panel rounded-2xl p-4 space-y-2.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5 text-indigo-500" />
+                <span>Test Arbitrary Foreign Speech / Real Call Audio</span>
+              </span>
+              <span className="text-[11px] text-slate-500">Auto-detects any language</span>
+            </div>
+            <form onSubmit={handleDirectForeignSubmit} className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Type or paste any foreign sentence (e.g. in Japanese, German, Spanish, French, Hindi)..."
+                value={foreignInputText}
+                onChange={(e) => setForeignInputText(e.target.value)}
+                className="flex-1 bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              />
+              <button
+                type="submit"
+                disabled={!foreignInputText.trim() || isLoadingAi}
+                className="px-3.5 py-2 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 text-white text-xs font-bold rounded-xl transition-all disabled:opacity-40 flex items-center gap-1.5 shrink-0 cursor-pointer shadow-sm"
+              >
+                <Send className="w-3 h-3" />
+                <span>Translate & Coach</span>
+              </button>
+            </form>
+          </div>
 
+          {/* Bilingual Transcript Log */}
+          <div className="glass-panel rounded-2xl p-4 flex flex-col h-[520px]">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200/80 dark:border-white/[0.08] text-xs">
+              <div className="flex items-center gap-2">
+                <Activity className="w-3.5 h-3.5 text-amber-500" />
+                <span className="font-bold text-slate-900 dark:text-white uppercase tracking-wider text-[11px]">
+                  Real-Time Meeting Log ({transcripts.length})
+                </span>
+              </div>
               {transcripts.length > 0 && (
                 <button
                   onClick={onClearTranscripts}
-                  className="text-slate-500 hover:text-rose-500 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-white/[0.04] transition-colors cursor-pointer"
-                  title="Clear transcript history"
+                  className="text-slate-400 hover:text-rose-500 text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  <Trash2 className="w-3 h-3" />
+                  <span>Clear</span>
                 </button>
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto space-y-3 py-3 pr-1">
+            <div className="flex-1 overflow-y-auto space-y-3 pt-3 pr-1">
               {transcripts.map((item) => (
                 <div
                   key={item.id}
-                  className={`p-3.5 rounded-xl border text-xs leading-relaxed transition-all ${
+                  className={`p-3.5 rounded-xl border transition-all ${
                     item.isUser
-                      ? 'bg-slate-50 dark:bg-white/[0.04] border-slate-200 dark:border-white/10 ml-6 sm:ml-8'
-                      : 'bg-white/80 dark:bg-black/30 border-slate-200/90 dark:border-white/[0.06] hover:border-amber-400/40'
+                      ? 'bg-amber-500/10 border-amber-500/30 ml-4'
+                      : 'bg-white/90 dark:bg-black/30 border-slate-200/90 dark:border-white/[0.06] mr-4'
                   }`}
                 >
-                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 mb-1.5">
+                  <div className="flex items-center justify-between text-[11px] mb-1.5">
                     <span className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
                       <span>{item.speaker}</span>
-                      <span className="text-slate-500 dark:text-slate-400 font-normal">· {item.speakerRole}</span>
+                      {item.speakerRole && (
+                        <span className="text-slate-400 font-normal">({item.speakerRole})</span>
+                      )}
                     </span>
-                    <span className="font-mono text-[10px] text-slate-500 tabular-nums">{item.timestamp}</span>
+                    <span className="text-slate-400 font-mono text-[10px]">{item.timestamp}</span>
                   </div>
 
-                  <div className="text-slate-500 dark:text-slate-400 text-xs italic mb-2 pl-3 border-l-2 border-slate-200 dark:border-white/10">
-                    "{item.originalText}"
-                  </div>
+                  <p className="text-xs text-slate-800 dark:text-slate-200 leading-relaxed font-sans">
+                    {item.originalText}
+                  </p>
 
-                  <div className="text-slate-800 dark:text-amber-200/90 font-medium text-xs pt-2 border-t border-slate-200/70 dark:border-white/[0.06] flex items-start gap-1.5">
-                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono uppercase font-bold shrink-0 mt-0.5">
-                      [{item.targetLanguage}]:
-                    </span>
-                    <span className="leading-snug">{item.translatedText}</span>
-                  </div>
+                  {!item.isUser && item.translatedText && (
+                    <div className="mt-2 pt-2 border-t border-slate-100 dark:border-white/[0.06] flex items-start gap-1.5 text-xs text-amber-800 dark:text-amber-200 font-medium">
+                      <span className="text-[10px] font-mono uppercase text-amber-600 dark:text-amber-400 font-bold shrink-0">
+                        {item.targetLanguage}:
+                      </span>
+                      <span>{item.translatedText}</span>
+                    </div>
+                  )}
                 </div>
               ))}
 
               {transcripts.length === 0 && (
-                <div className="py-20 text-center text-slate-500 dark:text-slate-400 text-xs space-y-3">
-                  <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-white/[0.04] border border-slate-200 dark:border-white/[0.08] flex items-center justify-center mx-auto text-slate-400">
-                    <Volume2 className="w-6 h-6" />
-                  </div>
-                  <p className="font-medium text-slate-700 dark:text-slate-300">No meeting speech recorded yet.</p>
-                  <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
-                    Speak into your microphone or click "Simulate Counterparty" above to see live foreign language transcription & translation.
+                <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400 dark:text-slate-500 text-xs space-y-2">
+                  <MessageSquare className="w-8 h-8 text-amber-500/40" />
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">Live Transcript Empty</span>
+                  <p className="max-w-xs text-slate-500 dark:text-slate-400 text-[11px]">
+                    Turn on the microphone above, simulate dialogue, or type counterparty speech to begin live transcription.
                   </p>
                 </div>
               )}
@@ -398,205 +625,160 @@ export const LiveMeetingHUD: React.FC<LiveMeetingHUDProps> = ({
           </div>
         </div>
 
-        {/* Column 2: Grounded Real-Time Sales Guidance (WHAT, HOW, and WHEN to speak) */}
+        {/* Column 2: WHAT / HOW / WHEN Real-Time Sales Guidance */}
         <div className={`lg:col-span-6 flex flex-col gap-4 ${mobileTab === 'cuecard' ? 'block' : 'hidden lg:flex'}`}>
-          <div className="glass-panel rounded-2xl p-4 sm:p-5 shadow-2xl flex flex-col min-h-[640px]">
-            {/* Cue Card Top Toolbar */}
-            <div className="flex items-center justify-between pb-3.5 border-b border-slate-200/80 dark:border-white/[0.08] text-xs">
-              <div className="flex items-center gap-2.5">
-                <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 font-black flex items-center justify-center text-xs shadow-sm">
-                  S
+          <div className="glass-panel-amber rounded-2xl p-5 shadow-xl relative overflow-hidden flex flex-col min-h-[560px]">
+            {/* Top Guidance Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-amber-500/20 text-xs">
+              <div className="flex items-center gap-2">
+                <Target className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                <span className="font-bold text-slate-900 dark:text-white uppercase tracking-wider text-xs">
+                  Real-Time Sales Teleprompter
                 </span>
-                <div>
-                  <div className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
-                    <span>Sales Execution Copilot</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
-                      Grounded
-                    </span>
-                  </div>
-                </div>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               </div>
 
-              {/* Notch view toggle */}
-              <button
-                onClick={() => setHudMode(hudMode === 'teleprompter-notch' ? 'docked-full' : 'teleprompter-notch')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer border ${
-                  hudMode === 'teleprompter-notch'
-                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md font-bold'
-                    : 'bg-slate-100 dark:bg-white/[0.04] hover:bg-slate-200 dark:hover:bg-white/[0.08] text-slate-700 dark:text-slate-300 border-slate-200 dark:border-white/[0.08]'
-                }`}
-                title="Toggle Eye-Level Teleprompter Notch"
-              >
-                <Layout className="w-3.5 h-3.5" />
-                <span>Teleprompter Mode</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setHudMode(hudMode === 'teleprompter-notch' ? 'docked-full' : 'teleprompter-notch')}
+                  className="px-2.5 py-1 text-[11px] rounded-lg bg-black/5 dark:bg-white/[0.05] hover:bg-black/10 dark:hover:bg-white/[0.1] text-slate-700 dark:text-slate-300 font-semibold border border-slate-200 dark:border-white/10 transition-colors cursor-pointer"
+                >
+                  {hudMode === 'teleprompter-notch' ? 'Dock HUD' : 'Webcam Eye-Level Mode'}
+                </button>
+              </div>
             </div>
 
-            {/* Active Cue Card Content */}
-            <div className="flex-1 overflow-y-auto py-4 space-y-4">
+            {/* Cue Card Body */}
+            <div className="flex-1 py-4 space-y-4">
               {cueCard ? (
                 <>
-                  {/* Trigger question header */}
-                  <div className="bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/[0.06] rounded-xl p-3.5">
-                    <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 mb-1">
-                      <span className="font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider text-[10px]">
-                        Client Inquiry / Raised Objection
-                      </span>
-                      <span className="font-mono text-slate-500 tabular-nums">{cueCard.timestamp}</span>
-                    </div>
-                    <p className="text-xs text-slate-800 dark:text-slate-200 font-medium italic">
-                      "{cueCard.triggerTranscript}"
-                    </p>
-                  </div>
-
-                  {/* SECTION 1: WHEN TO SPEAK (Turn-taking guidance) */}
-                  {cueCard.timingCue && (
-                    <div className="p-3.5 rounded-xl border border-sky-500/30 bg-sky-500/[0.06] flex items-start gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-600 dark:text-sky-400 shrink-0 mt-0.5">
-                        <Clock className="w-4 h-4" />
+                  {/* Micro-Timing & Posture Strip (WHEN to speak & Conversation Phase) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                    <div className="bg-white/80 dark:bg-white/[0.05] border border-slate-200 dark:border-white/10 rounded-xl p-3 flex items-start gap-2.5 shadow-xs">
+                      <Clock className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="text-[10px] uppercase font-bold text-amber-600 dark:text-amber-400 tracking-wider">
+                          WHEN to Speak (Micro-Timing)
+                        </div>
+                        <div className="font-semibold text-slate-900 dark:text-white text-xs mt-0.5">
+                          {cueCard.timingCue?.whenToSpeak || 'Speak as speaker concludes thought.'}
+                        </div>
                       </div>
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between gap-2 mb-1">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-sky-700 dark:text-sky-300 flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-sky-500 animate-pulse" />
-                            WHEN TO SPEAK (Turn-Taking)
-                          </span>
-                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-sky-500/15 text-sky-700 dark:text-sky-300 font-mono">
-                            {cueCard.timingCue.conversationPhase}
+                    </div>
+
+                    <div className="bg-white/80 dark:bg-white/[0.05] border border-slate-200 dark:border-white/10 rounded-xl p-3 flex items-start gap-2.5 shadow-xs">
+                      <Zap className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400 tracking-wider">
+                          Sales Phase & Urgency
+                        </div>
+                        <div className="font-semibold text-slate-900 dark:text-white text-xs mt-0.5 capitalize flex items-center gap-2">
+                          <span>{cueCard.timingCue?.conversationPhase || 'Discovery Qualification'}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 font-mono font-bold">
+                            {cueCard.timingCue?.urgencyLevel || 'Calm'}
                           </span>
                         </div>
-                        <p className="text-xs text-slate-800 dark:text-slate-200 font-medium leading-relaxed">
-                          {cueCard.timingCue.whenToSpeak}
-                        </p>
                       </div>
                     </div>
-                  )}
+                  </div>
 
-                  {/* SECTION 2: WHAT TO SPEAK (Verbatim Response) */}
-                  <div className="glass-panel-amber rounded-2xl p-5 shadow-lg relative">
-                    <div className="flex items-center justify-between pb-3 border-b border-amber-500/20 mb-3">
-                      <div className="flex items-center gap-2 text-xs font-bold text-amber-700 dark:text-amber-300 uppercase tracking-wider">
-                        <Target className="w-4 h-4 text-amber-500" />
-                        <span>WHAT TO SPEAK (Say Out Loud)</span>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={handleCopyVerbatim}
-                          className="px-3 py-1.5 rounded-lg bg-white/80 dark:bg-black/40 hover:bg-white dark:hover:bg-black/60 text-slate-800 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 border border-slate-200 dark:border-white/10 transition-colors cursor-pointer shadow-sm"
-                        >
-                          {copiedVerbatim ? (
-                            <>
-                              <Check className="w-3.5 h-3.5 text-emerald-500" />
-                              <span className="text-emerald-600 dark:text-emerald-400 font-bold">Copied</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3.5 h-3.5 text-amber-500" />
-                              <span>Copy Pitch</span>
-                            </>
-                          )}
-                        </button>
-
-                        <button
-                          onClick={() => handleSpeakText(cueCard.verbatimAnswer)}
-                          disabled={isPlayingAudio}
-                          className="px-3 py-1.5 rounded-lg bg-white/80 dark:bg-black/40 hover:bg-white dark:hover:bg-black/60 text-slate-800 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 border border-slate-200 dark:border-white/10 transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
-                        >
-                          <Volume2 className="w-3.5 h-3.5 text-amber-500" />
-                          <span>{isPlayingAudio ? 'Speaking...' : 'Listen Audio'}</span>
-                        </button>
-                      </div>
+                  {/* HOW to Speak (Delivery & Modulation Guidance) */}
+                  <div className="bg-amber-500/10 border border-amber-500/25 rounded-xl p-3.5 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-amber-800 dark:text-amber-300 text-[11px] uppercase tracking-wider">
+                        HOW to Speak (Tone & Cadence)
+                      </span>
+                      <span className="text-slate-600 dark:text-slate-400 font-mono text-[10px]">
+                        Tone: {cueCard.deliveryGuidance?.tone || 'Assured & consultative'}
+                      </span>
                     </div>
-
-                    <p className="text-base md:text-lg font-bold text-slate-900 dark:text-white leading-relaxed tracking-tight">
-                      "{cueCard.verbatimAnswer}"
-                    </p>
-
-                    {cueCard.groundedQuotes.length > 0 && (
-                      <div className="mt-4 pt-3 border-t border-amber-500/20 text-xs text-slate-600 dark:text-slate-300 flex items-center gap-2">
-                        <Shield className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                        <span className="truncate">{cueCard.groundedQuotes[0]}</span>
+                    <div className="text-slate-700 dark:text-slate-200 leading-snug">
+                      {cueCard.deliveryGuidance?.pacing || 'Keep steady cadence; pause deliberately after key metrics.'}
+                    </div>
+                    {cueCard.deliveryGuidance?.emphasisKeywords && cueCard.deliveryGuidance.emphasisKeywords.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                        <span className="text-[10px] font-bold text-slate-500">Emphasis Keywords:</span>
+                        {cueCard.deliveryGuidance.emphasisKeywords.map((kw, idx) => (
+                          <span
+                            key={idx}
+                            className="text-[10px] bg-white/90 dark:bg-black/40 border border-amber-500/30 text-amber-800 dark:text-amber-200 font-bold px-2 py-0.5 rounded-md"
+                          >
+                            "{kw}"
+                          </span>
+                        ))}
                       </div>
                     )}
                   </div>
 
-                  {/* SECTION 3: HOW TO SPEAK (Delivery Guidance) */}
-                  {cueCard.deliveryGuidance && (
-                    <div className="p-4 rounded-xl border border-indigo-500/30 bg-indigo-500/[0.05] space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
-                          <Zap className="w-3.5 h-3.5 text-indigo-500" />
-                          HOW TO DELIVER (Tone & Vocal Pacing)
-                        </span>
-                        <div className="flex items-center gap-2 text-[11px] font-mono">
-                          <span className="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-semibold">
-                            {cueCard.deliveryGuidance.tone}
-                          </span>
-                          <span className="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-semibold">
-                            {cueCard.deliveryGuidance.pacing}
-                          </span>
-                        </div>
+                  {/* WHAT to Speak: Verbatim Grounded Speech */}
+                  <div className="bg-white/90 dark:bg-white/[0.04] border border-slate-200 dark:border-white/10 rounded-2xl p-4 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+                      <span className="font-bold text-slate-900 dark:text-white uppercase tracking-wider text-[11px]">
+                        WHAT to Speak (Verbatim Grounded Answer)
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleSpeakText(cueCard.verbatimAnswer)}
+                          className="p-1.5 rounded-lg bg-slate-100 dark:bg-white/[0.05] hover:bg-slate-200 dark:hover:bg-white/[0.1] text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+                          title="Read out loud (TTS)"
+                        >
+                          <Volume2 className={`w-3.5 h-3.5 ${isPlayingAudio ? 'text-amber-500 animate-pulse' : ''}`} />
+                        </button>
+                        <button
+                          onClick={handleCopyVerbatim}
+                          className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-white/[0.05] hover:bg-slate-200 dark:hover:bg-white/[0.1] text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                        >
+                          {copiedVerbatim ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3 text-amber-500" />}
+                          <span>{copiedVerbatim ? 'Copied' : 'Copy'}</span>
+                        </button>
                       </div>
-
-                      {cueCard.deliveryGuidance.emphasisKeywords?.length > 0 && (
-                        <div className="flex items-center gap-1.5 flex-wrap pt-1 text-xs">
-                          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">Emphasize:</span>
-                          {cueCard.deliveryGuidance.emphasisKeywords.map((kw, i) => (
-                            <span
-                              key={i}
-                              className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-800 dark:text-amber-300 font-semibold text-[11px] border border-amber-500/30"
-                            >
-                              "{kw}"
-                            </span>
-                          ))}
-                        </div>
-                      )}
                     </div>
-                  )}
 
-                  {/* SECTION 4: WHAT TO ASK NEXT (High-Leverage Steer Question) */}
-                  {cueCard.followUpQuestion && (
-                    <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/[0.06] flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-2.5 flex-1">
-                        <HelpCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300 mb-1">
-                            WHAT TO ASK NEXT (Regain Deal Control)
-                          </div>
-                          <p className="text-xs font-semibold text-slate-900 dark:text-white leading-relaxed">
-                            "{cueCard.followUpQuestion}"
-                          </p>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={handleCopyQuestion}
-                        className="p-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 transition-colors shrink-0 cursor-pointer"
-                        title="Copy question"
-                      >
-                        {copiedQuestion ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Verified Knowledge Base Talking Points */}
-                  <div className="bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/[0.06] rounded-xl p-4">
-                    <div className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                      <Check className="w-3.5 h-3.5 text-emerald-500" /> Verified Knowledge Base Facts & Metrics
-                    </div>
-                    <div className="space-y-2">
-                      {cueCard.talkingPoints.map((pt, idx) => (
-                        <div key={idx} className="flex items-start gap-2.5 text-xs text-slate-700 dark:text-slate-200 leading-snug">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 shrink-0 shadow-[0_0_6px_#f59e0b]" />
-                          <span>{pt}</span>
-                        </div>
-                      ))}
+                    <div className="text-base sm:text-lg font-bold text-slate-900 dark:text-white leading-relaxed tracking-tight">
+                      "{cueCard.verbatimAnswer}"
                     </div>
                   </div>
 
-                  {/* Suggested Presentation Slide */}
-                  <div className="bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/[0.06] rounded-xl p-4 flex items-center justify-between gap-3 hover:border-amber-500/40 transition-colors">
+                  {/* Follow-up Strategic Question (Retain Conversational Control) */}
+                  {cueCard.followUpQuestion && (
+                    <div className="bg-indigo-500/10 border border-indigo-500/25 rounded-xl p-3.5 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-indigo-700 dark:text-indigo-300 text-[11px] uppercase tracking-wider">
+                          Follow-Up Steering Question (Ask Next)
+                        </span>
+                        <button
+                          onClick={handleCopyQuestion}
+                          className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-1"
+                        >
+                          {copiedQuestion ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedQuestion ? 'Copied' : 'Copy Question'}</span>
+                        </button>
+                      </div>
+                      <div className="font-semibold text-slate-900 dark:text-white text-xs sm:text-sm leading-snug">
+                        "{cueCard.followUpQuestion}"
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Grounded Key Facts Talking Points */}
+                  {cueCard.talkingPoints && cueCard.talkingPoints.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                        Grounded Facts to Lean On:
+                      </div>
+                      <div className="space-y-1">
+                        {cueCard.talkingPoints.map((tp, idx) => (
+                          <div key={idx} className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 shrink-0" />
+                            <span>{tp}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Recommended Presentation Slide to Show */}
+                  <div className="bg-slate-50/90 dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-xl p-3 flex items-center justify-between gap-3 shadow-xs">
                     <div className="flex items-center gap-3 overflow-hidden">
                       <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
                         <Presentation className="w-4 h-4" />
@@ -617,7 +799,7 @@ export const LiveMeetingHUD: React.FC<LiveMeetingHUDProps> = ({
                     </button>
                   </div>
 
-                  {/* Objection Defuser Strategy */}
+                  {/* Tactical Objection Defuser Strategy */}
                   {cueCard.objectionDefuser && (
                     <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3.5 text-xs flex items-start gap-2.5">
                       <Lightbulb className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
@@ -641,10 +823,10 @@ export const LiveMeetingHUD: React.FC<LiveMeetingHUDProps> = ({
               )}
             </div>
 
-            {/* Manual Query Bar */}
+            {/* Dynamic Grounded Quick Prompts Bar & Manual Query Bar */}
             <div className="pt-3.5 border-t border-slate-200/80 dark:border-white/[0.08] space-y-2.5">
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px]">
-                {quickPrompts.map((prompt, idx) => (
+                {dynamicQuickPrompts.map((prompt, idx) => (
                   <button
                     key={idx}
                     onClick={() => onAskCopilot(prompt)}
@@ -658,7 +840,7 @@ export const LiveMeetingHUD: React.FC<LiveMeetingHUDProps> = ({
               <form onSubmit={handleManualSubmit} className="relative flex items-center">
                 <input
                   type="text"
-                  placeholder="Ask anything or simulate objection (e.g. 'How do you handle EU GDPR data?')..."
+                  placeholder="Ask anything or simulate client query..."
                   value={manualQuery}
                   onChange={(e) => setManualQuery(e.target.value)}
                   className="w-full bg-slate-100/90 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl pl-3.5 pr-20 py-2.5 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 transition-all"

@@ -27,7 +27,9 @@ export type AIProviderType = 'gemini' | 'openrouter' | 'ollama' | 'lmstudio' | '
 export interface AIProviderConfig {
   activeProvider: AIProviderType;
   geminiModel: string;
+  customGeminiKey?: string;
   openRouterModel: string;
+  customOpenRouterKey?: string;
   ollamaEndpoint: string;
   ollamaModel: string;
   lmStudioEndpoint: string;

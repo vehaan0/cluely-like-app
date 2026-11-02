@@ -17,11 +17,12 @@ const port = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '15mb' }));
 
-// Check if we have a real runtime Gemini API key
+// Check if we have a real runtime Gemini API key in env
 const rawKey = process.env.GEMINI_API_KEY;
 const hasValidGeminiKey = Boolean(rawKey && rawKey.trim() !== '' && !rawKey.includes('MY_GEMINI_API_KEY'));
 
-const ai = hasValidGeminiKey
+// Global default Gemini client
+const defaultAi = hasValidGeminiKey
   ? new GoogleGenAI({
       apiKey: rawKey!,
       httpOptions: {
@@ -32,9 +33,36 @@ const ai = hasValidGeminiKey
     })
   : null;
 
+// Dynamic Gemini Client Resolver (prioritizes user custom key from UI if provided)
+function getEffectiveGeminiClient(customKey?: string): { client: GoogleGenAI | null; isCustom: boolean } {
+  if (customKey && customKey.trim().length > 10 && !customKey.includes('MY_GEMINI_API_KEY')) {
+    try {
+      const client = new GoogleGenAI({
+        apiKey: customKey.trim(),
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      });
+      return { client, isCustom: true };
+    } catch {
+      return { client: defaultAi, isCustom: false };
+    }
+  }
+  return { client: defaultAi, isCustom: false };
+}
+
 // OpenRouter key
-const openRouterKey = process.env.OPENROUTER_API_KEY;
-const hasOpenRouterKey = Boolean(openRouterKey && openRouterKey.trim() !== '' && !openRouterKey.includes('MY_OPENROUTER_API_KEY'));
+const envOpenRouterKey = process.env.OPENROUTER_API_KEY;
+const hasEnvOpenRouterKey = Boolean(envOpenRouterKey && envOpenRouterKey.trim() !== '' && !envOpenRouterKey.includes('MY_OPENROUTER_API_KEY'));
+
+function getEffectiveOpenRouterKey(customKey?: string): string | null {
+  if (customKey && customKey.trim().length > 10 && !customKey.includes('MY_OPENROUTER_API_KEY')) {
+    return customKey.trim();
+  }
+  return hasEnvOpenRouterKey ? envOpenRouterKey! : null;
+}
 
 // State tracking for quota exhaustion
 let isGeminiQuotaExceeded = false;
@@ -61,14 +89,18 @@ function isGeminiQuotaError(err: any): boolean {
 async function queryActiveLLM(prompt: string, providerConfig?: any): Promise<string | null> {
   const provider = providerConfig?.activeProvider || (hasValidGeminiKey ? 'gemini' : 'local-engine');
 
-  if (provider === 'gemini' && ai) {
-    if (isGeminiQuotaExceeded) {
-      // Free tier quota known to be depleted; gracefully defer to SAM local engine
+  if (provider === 'gemini') {
+    const { client: geminiClient, isCustom } = getEffectiveGeminiClient(providerConfig?.customGeminiKey);
+    if (!geminiClient) {
+      return null;
+    }
+    // Only suppress if using default free env key that exhausted quota
+    if (!isCustom && isGeminiQuotaExceeded) {
       return null;
     }
     const model = providerConfig?.geminiModel || 'gemini-3.8-flash';
     try {
-      const response = await ai.models.generateContent({
+      const response = await geminiClient.models.generateContent({
         model,
         contents: prompt,
         config: {
@@ -78,11 +110,13 @@ async function queryActiveLLM(prompt: string, providerConfig?: any): Promise<str
       return response.text || null;
     } catch (err: any) {
       if (isGeminiQuotaError(err)) {
-        isGeminiQuotaExceeded = true;
-        quotaExceededMessage =
-          'Gemini Free Tier daily quota limit reached (429). SAM seamlessly switched to the built-in local engine.';
+        if (!isCustom) {
+          isGeminiQuotaExceeded = true;
+          quotaExceededMessage =
+            'Gemini Free Tier daily quota limit reached (429). SAM seamlessly switched to the built-in local engine.';
+        }
         console.warn(
-          '[SAM Notice] Gemini daily request quota reached (429 RESOURCE_EXHAUSTED). Seamlessly serving grounded responses via SAM Local Engine.'
+          '[SAM Notice] Gemini quota hit. Serving grounded responses via SAM dynamic engine.'
         );
       } else {
         console.warn('[SAM Notice] Gemini request error, using local engine fallback:', err?.message || err);
@@ -91,40 +125,43 @@ async function queryActiveLLM(prompt: string, providerConfig?: any): Promise<str
     }
   }
 
-  if (provider === 'openrouter' && hasOpenRouterKey) {
-    const model = providerConfig?.openRouterModel || 'meta-llama/llama-3.3-70b-instruct';
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 6000);
-    try {
-      const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${openRouterKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': process.env.APP_URL || 'http://localhost:3000',
-          'X-Title': 'SAM AI Meeting Pitch Copilot',
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            {
-              role: 'system',
-              content: 'You are SAM, a real-time sales and presentation copilot. Return strictly valid JSON only with keys: verbatimAnswer, keyTalkingPoints, relevantSlideId, relevantSlideTitle, objectionDefuser, groundedQuotes.',
-            },
-            { role: 'user', content: prompt },
-          ],
-          response_format: { type: 'json_object' },
-          temperature: providerConfig?.temperature ?? 0.3,
-        }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-      if (orRes.ok) {
-        const data: any = await orRes.json();
-        return data.choices?.[0]?.message?.content || null;
+  if (provider === 'openrouter') {
+    const effectiveOrKey = getEffectiveOpenRouterKey(providerConfig?.customOpenRouterKey);
+    if (effectiveOrKey) {
+      const model = providerConfig?.openRouterModel || 'meta-llama/llama-3.3-70b-instruct';
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 6000);
+      try {
+        const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${effectiveOrKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': process.env.APP_URL || 'http://localhost:3000',
+            'X-Title': 'SAM AI Meeting Pitch Copilot',
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              {
+                role: 'system',
+                content: 'You are SAM, a real-time sales and presentation copilot. Return strictly valid JSON only with keys: verbatimAnswer, keyTalkingPoints, relevantSlideId, relevantSlideTitle, objectionDefuser, groundedQuotes.',
+              },
+              { role: 'user', content: prompt },
+            ],
+            response_format: { type: 'json_object' },
+            temperature: providerConfig?.temperature ?? 0.3,
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (orRes.ok) {
+          const data: any = await orRes.json();
+          return data.choices?.[0]?.message?.content || null;
+        }
+      } catch {
+        clearTimeout(timeout);
       }
-    } catch {
-      clearTimeout(timeout);
     }
   }
 
@@ -199,62 +236,67 @@ app.post('/api/ai/test', async (req, res) => {
     if (provider === 'local-engine') {
       return res.json({
         success: true,
-        message: 'SAM Built-in Engine ready (sub-10ms latency)',
+        message: 'SAM Built-in Grounded Engine active (sub-10ms response)',
         provider: 'local-engine',
       });
     }
 
     if (provider === 'gemini') {
-      if (!ai) {
+      const { client: geminiClient, isCustom } = getEffectiveGeminiClient(config?.customGeminiKey);
+      if (!geminiClient) {
         return res.json({
           success: true,
-          message: 'Gemini configured with local deterministic fallback engine',
+          message: 'Gemini configured with built-in dynamic fallback engine. (Enter custom Gemini API key to activate live cloud generation).',
           provider: 'gemini',
         });
       }
       try {
-        const response = await ai.models.generateContent({
-          model: config?.geminiModel || 'gemini-3.8-flash',
-          contents: 'Say OK',
+        const testModel = config?.geminiModel || 'gemini-3.8-flash';
+        const response = await geminiClient.models.generateContent({
+          model: testModel,
+          contents: 'Respond with OK',
         });
-        isGeminiQuotaExceeded = false;
+        if (isCustom) {
+          isGeminiQuotaExceeded = false;
+        }
         return res.json({
           success: true,
-          message: `Gemini API connected successfully (${config?.geminiModel || 'gemini-3.8-flash'})`,
+          message: `Gemini API connected successfully using ${testModel}${isCustom ? ' (Personal API Key)' : ' (Environment Key)'}`,
           provider: 'gemini',
         });
       } catch (err: any) {
         if (isGeminiQuotaError(err)) {
-          isGeminiQuotaExceeded = true;
+          if (!isCustom) isGeminiQuotaExceeded = true;
           return res.json({
             success: true,
             quotaExceeded: true,
-            message: 'Gemini Free Tier daily limit reached (429 RESOURCE_EXHAUSTED). SAM is actively running on its built-in local engine; or you can connect OpenRouter, Ollama, or LM Studio.',
+            message: 'Gemini quota limit reached (429). SAM is actively running on its built-in local engine; or you can connect your own Gemini key or OpenRouter / Ollama.',
             provider: 'gemini',
           });
         }
         return res.json({
           success: false,
-          error: `Gemini API: ${err.message}`,
+          error: `Gemini API test: ${err.message}`,
         });
       }
     }
 
     if (provider === 'openrouter') {
-      if (!hasOpenRouterKey) {
+      const effectiveOrKey = getEffectiveOpenRouterKey(config?.customOpenRouterKey);
+      if (!effectiveOrKey) {
         return res.json({
           success: true,
-          message: 'OpenRouter ready. Add OPENROUTER_API_KEY in environment for live requests.',
+          message: 'OpenRouter ready. Enter your OpenRouter API key above to enable live routing.',
           provider: 'openrouter',
         });
       }
       try {
         const orResponse = await fetch('https://openrouter.ai/api/v1/auth/key', {
-          headers: { Authorization: `Bearer ${openRouterKey}` },
+          headers: { Authorization: `Bearer ${effectiveOrKey}` },
         });
         return res.json({
           success: orResponse.ok,
-          message: orResponse.ok ? 'OpenRouter API key authenticated' : 'Invalid OpenRouter Key',
+          message: orResponse.ok ? 'OpenRouter API key authenticated successfully' : 'Invalid OpenRouter Key',
           provider: 'openrouter',
         });
       } catch (err: any) {
@@ -282,7 +324,6 @@ app.post('/api/ai/test', async (req, res) => {
           });
         }
       } catch {
-        // Return clear guidance
         return res.json({
           success: false,
           error: `Cannot reach Ollama at ${endpoint}. Start Ollama with 'ollama serve'.`,
@@ -333,53 +374,92 @@ app.post('/api/copilot/translate', async (req, res) => {
       (l) => l.name.toLowerCase() === targetLanguage.toLowerCase()
     )?.code || 'en';
 
-    // If activeProvider is local-engine or no cloud key is available, use fast grounded translation
     const activeProvider = providerConfig?.activeProvider || (hasValidGeminiKey ? 'gemini' : 'local-engine');
-    if (activeProvider === 'local-engine' || (!ai && !hasOpenRouterKey)) {
-      const fastResult = getFastTranslation(text, targetLangCode, targetLanguage);
-      return res.json({
-        translatedText: fastResult,
-        sourceLanguage: effectiveSource,
-        detectedLanguageCode: detected.code,
-        confidence: detected.confidence,
-        targetLanguage,
-        isFallback: false,
-      });
-    }
 
-    if (activeProvider === 'gemini' && ai && !isGeminiQuotaExceeded) {
-      try {
-        const prompt = `You are SAM, a real-time speech translation engine.
+    // 1. Check Gemini (including user-provided custom key)
+    if (activeProvider === 'gemini') {
+      const { client: geminiClient, isCustom } = getEffectiveGeminiClient(providerConfig?.customGeminiKey);
+      if (geminiClient && (isCustom || !isGeminiQuotaExceeded)) {
+        try {
+          const prompt = `You are SAM, a real-time speech translation engine.
 The speaker said: "${text}".
 Spoken language detected: ${effectiveSource}.
 Translate it directly and accurately into ${targetLanguage}.
 Respond with the translated text only without quotes or explanations.`;
 
-        const response = await ai.models.generateContent({
-          model: providerConfig?.geminiModel || 'gemini-3.8-flash',
-          contents: prompt,
-          config: {
-            systemInstruction: `Translate verbatim and naturally into ${targetLanguage}. Output translation only.`,
-          },
-        });
+          const response = await geminiClient.models.generateContent({
+            model: providerConfig?.geminiModel || 'gemini-3.8-flash',
+            contents: prompt,
+            config: {
+              systemInstruction: `Translate verbatim and naturally into ${targetLanguage}. Output translation only.`,
+            },
+          });
 
-        const translatedText = response.text?.trim() || getFastTranslation(text, targetLangCode, targetLanguage);
-        return res.json({
-          translatedText,
-          sourceLanguage: effectiveSource,
-          detectedLanguageCode: detected.code,
-          confidence: detected.confidence,
-          targetLanguage,
-          isFallback: false,
-          quotaExceeded: false,
-        });
-      } catch (err: any) {
-        if (isGeminiQuotaError(err)) {
-          isGeminiQuotaExceeded = true;
-          console.warn('[SAM Notice] Gemini translation quota limit reached (429). Using SAM Fast Local Translation engine.');
-        } else {
-          console.warn('[SAM Notice] Gemini translation error, using fast local engine:', err?.message || err);
+          const translatedText = response.text?.trim() || getFastTranslation(text, targetLangCode, targetLanguage);
+          return res.json({
+            translatedText,
+            sourceLanguage: effectiveSource,
+            detectedLanguageCode: detected.code,
+            confidence: detected.confidence,
+            targetLanguage,
+            isFallback: false,
+            quotaExceeded: false,
+          });
+        } catch (err: any) {
+          if (isGeminiQuotaError(err)) {
+            if (!isCustom) isGeminiQuotaExceeded = true;
+            console.warn('[SAM Notice] Gemini translation quota reached (429). Using SAM Fast Local Translation engine.');
+          } else {
+            console.warn('[SAM Notice] Gemini translation error, using fast local engine:', err?.message || err);
+          }
         }
+      }
+    }
+
+    // 2. Check OpenRouter (including custom key)
+    if (activeProvider === 'openrouter') {
+      const effectiveOrKey = getEffectiveOpenRouterKey(providerConfig?.customOpenRouterKey);
+      if (effectiveOrKey) {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 4000);
+          const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${effectiveOrKey}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': process.env.APP_URL || 'http://localhost:3000',
+              'X-Title': 'SAM AI Meeting Pitch Copilot',
+            },
+            body: JSON.stringify({
+              model: providerConfig?.openRouterModel || 'meta-llama/llama-3.3-70b-instruct',
+              messages: [
+                {
+                  role: 'system',
+                  content: `You are a real-time translator. Translate directly into ${targetLanguage}. Output only the translation.`,
+                },
+                { role: 'user', content: text },
+              ],
+              temperature: 0.1,
+            }),
+            signal: controller.signal,
+          });
+          clearTimeout(timeout);
+          if (orRes.ok) {
+            const data: any = await orRes.json();
+            const translatedText = data.choices?.[0]?.message?.content?.trim();
+            if (translatedText) {
+              return res.json({
+                translatedText,
+                sourceLanguage: effectiveSource,
+                detectedLanguageCode: detected.code,
+                confidence: detected.confidence,
+                targetLanguage,
+                isFallback: false,
+              });
+            }
+          }
+        } catch {}
       }
     }
 
@@ -418,6 +498,40 @@ Respond with the translated text only without quotes or explanations.`;
   }
 });
 
+// Helper to construct dynamic Knowledge Base from request without static fallback
+function buildEffectiveKnowledgeBase(body: any): any {
+  if (body?.knowledgeBase && Array.isArray(body.knowledgeBase.documents)) {
+    return body.knowledgeBase;
+  }
+  const kbTitle = body?.kbTitle || 'Product Knowledge Base';
+  const kbContent = body?.knowledgeBaseContent || '';
+  const documents = (body?.documents && Array.isArray(body.documents) && body.documents.length > 0)
+    ? body.documents
+    : [
+        {
+          id: 'doc-dynamic',
+          title: kbTitle,
+          category: 'architecture',
+          content: kbContent || `${kbTitle} documentation and specifications.`,
+          keyFacts: kbContent
+            ? kbContent.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 10).slice(0, 5)
+            : [`${kbTitle} system overview`],
+        },
+      ];
+  const slides = (body?.presentationSlides && Array.isArray(body.presentationSlides) && body.presentationSlides.length > 0)
+    ? body.presentationSlides
+    : DEFAULT_KB_OMNIFLOW.slides;
+
+  return {
+    id: 'kb-active',
+    name: kbTitle,
+    tagline: '',
+    productType: 'Enterprise',
+    documents,
+    slides,
+  };
+}
+
 // Grounded Knowledge Base Pitch & Presentation Copilot Endpoint
 app.post('/api/copilot/assist', async (req, res) => {
   try {
@@ -449,7 +563,7 @@ The counterparty just said / asked: "${queryToAnswer}".
 Presenter's preferred output language: ${preferredLanguage}.
 
 --- FEED PRODUCT KNOWLEDGE BASE ---
-${knowledgeBaseContent || 'Enterprise product documentation with 99.99% uptime, SOC2 Type II, multi-region failover, custom API webhooks, and tiered pricing.'}
+${knowledgeBaseContent || 'Enterprise product documentation with verified uptime, security controls, and transparent pricing.'}
 
 --- AVAILABLE PRESENTATION SLIDES ---
 ${slidesSummary}
@@ -459,7 +573,7 @@ You must synthesize the counterparty's speech and return STRICT JSON with:
 1. "verbatimAnswer": Exactly what the presenter should say out loud right now in ${preferredLanguage}. Make it confident, conversational, crystal clear, authoritative, and completely grounded in the Knowledge Base (no robotic clichés or AI disclaimers).
 2. "deliveryGuidance": An object with:
    - "tone": Exact emotional and vocal posture to hold (e.g. "Firm & authoritative", "Empathetic & consultative").
-   - "pacing": Specific cadence instructions (e.g. "Pause for 1 full second after quoting the 99.99% SLA").
+   - "pacing": Specific cadence instructions (e.g. "Pause for 1 full second after quoting metrics").
    - "emphasisKeywords": Array of 2-3 specific phrases to lean on with vocal weight.
 3. "timingCue": An object with:
    - "whenToSpeak": Exact trigger timing (e.g. "Speak immediately without hesitation — delay signals doubt").
@@ -505,8 +619,9 @@ Respond with valid JSON only.`;
       }
     }
 
-    // High-speed deterministic local engine fallback
-    const localCard = generateLocalCueCard(DEFAULT_KB_OMNIFLOW, queryToAnswer, preferredLanguage);
+    // High-speed dynamic local engine fallback using active dynamic Knowledge Base
+    const effectiveKb = buildEffectiveKnowledgeBase(req.body);
+    const localCard = generateLocalCueCard(effectiveKb, queryToAnswer, preferredLanguage);
     res.json({
       verbatimAnswer: localCard.verbatimAnswer,
       deliveryGuidance: localCard.deliveryGuidance,
@@ -529,7 +644,8 @@ Respond with valid JSON only.`;
     } else {
       console.warn('[SAM Notice] Copilot assist serving local fallback:', error?.message || error);
     }
-    const localCard = generateLocalCueCard(DEFAULT_KB_OMNIFLOW, req.body?.quickQuery || req.body?.transcript || 'overview', req.body?.preferredLanguage || 'English');
+    const effectiveKb = buildEffectiveKnowledgeBase(req.body);
+    const localCard = generateLocalCueCard(effectiveKb, req.body?.quickQuery || req.body?.transcript || 'overview', req.body?.preferredLanguage || 'English');
     res.json({
       verbatimAnswer: localCard.verbatimAnswer,
       deliveryGuidance: localCard.deliveryGuidance,
@@ -539,10 +655,8 @@ Respond with valid JSON only.`;
       relevantSlideId: localCard.relevantSlideId,
       relevantSlideTitle: localCard.relevantSlideTitle,
       objectionDefuser: localCard.objectionDefuser,
-      groundedQuotes: localCard.groundedQuotes,
       isFallback: true,
       quotaExceeded: isGeminiQuotaExceeded,
-      quotaMessage: isGeminiQuotaExceeded ? quotaExceededMessage : undefined,
       provider: 'local-engine',
     });
   }

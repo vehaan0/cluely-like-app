@@ -106,3 +106,54 @@ test('identifyLanguage accurately detects spoken language', () => {
   assert.equal(en.name, 'English');
 });
 
+test('Dynamic KB: handles blank/empty knowledge base gracefully without errors', () => {
+  const blankKb = {
+    id: 'kb-custom-empty',
+    name: 'Aura Health AI',
+    tagline: 'Cardiology Diagnostics Assistant',
+    productType: 'MedTech',
+    documents: [],
+    slides: [],
+  };
+
+  const searchRes = searchKnowledgeBase(blankKb, 'What is the accuracy rate?');
+  assert.ok(searchRes.topDoc);
+  assert.match(searchRes.topDoc.title, /Aura Health AI Overview/);
+
+  const cueCard = generateLocalCueCard(blankKb, 'What is the accuracy rate?');
+  assert.ok(cueCard.verbatimAnswer);
+  assert.match(cueCard.verbatimAnswer, /Aura Health AI/);
+  assert.ok(cueCard.timingCue);
+  assert.ok(cueCard.deliveryGuidance);
+});
+
+test('Dynamic KB: derives verbatim answer and facts directly from custom user uploaded document', () => {
+  const customKb = {
+    id: 'kb-fintech',
+    name: 'FinSafe Global',
+    tagline: 'High Frequency Fraud Prevention',
+    productType: 'FinTech',
+    documents: [
+      {
+        id: 'doc-custom-1',
+        title: 'Real-Time Fraud Prevention Engine',
+        category: 'fraud-detection',
+        content: 'FinSafe screens 500,000 transactions per second with a verified 99.98% fraud catch rate and sub-2ms transaction delay.',
+        keyFacts: [
+          '500,000 transactions per second throughput',
+          '99.98% verified fraud catch rate',
+          'Sub-2ms transaction authorization latency',
+        ],
+      },
+    ],
+    slides: [],
+  };
+
+  const cueCard = generateLocalCueCard(customKb, 'Tell us about your transaction throughput and fraud catch rate');
+  assert.match(cueCard.verbatimAnswer, /FinSafe Global/);
+  assert.match(cueCard.verbatimAnswer, /500,000 transactions per second/);
+  assert.equal(cueCard.talkingPoints[0], '500,000 transactions per second throughput');
+  assert.match(cueCard.groundedQuotes[0], /Real-Time Fraud Prevention Engine/);
+});
+
+
