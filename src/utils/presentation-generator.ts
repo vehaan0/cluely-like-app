@@ -11,6 +11,7 @@ export interface GeneratedPresentation {
   id: string;
   title: string;
   subtitle: string;
+  topic?: string;
   durationMinutes: number;
   targetAudience: string;
   createdAt: string;

@@ -1,11 +1,41 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      VitePWA({
+        registerType: 'autoUpdate',
+        devOptions: {
+          enabled: true,
+        },
+        includeAssets: ['icon.svg', 'manifest.json'],
+        manifest: {
+          id: '/',
+          name: 'SAM - AI Sales Copilot',
+          short_name: 'SAM Copilot',
+          description: 'Real-time AI sales copilot providing verbatim pitch cue cards, live bilingual translation, and product knowledge base guidance.',
+          theme_color: '#07080c',
+          background_color: '#07080c',
+          display: 'standalone',
+          start_url: '/',
+          scope: '/',
+          icons: [
+            {
+              src: '/icon.svg',
+              sizes: '192x192 512x512',
+              type: 'image/svg+xml',
+              purpose: 'any maskable',
+            },
+          ],
+        },
+      }),
+    ],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

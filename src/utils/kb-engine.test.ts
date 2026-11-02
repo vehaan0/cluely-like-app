@@ -41,7 +41,7 @@ test('searchKnowledgeBase routes architecture and latency queries correctly', ()
   assert.equal(result.relevantSlide.id, 'slide-2');
 });
 
-test('generateLocalCueCard produces complete grounded pitch cue card', () => {
+test('generateLocalCueCard produces complete grounded pitch cue card with WHAT, HOW, and WHEN sales guidance', () => {
   const cueCard = generateLocalCueCard(
     DEFAULT_KB_OMNIFLOW,
     'What is your pricing model for enterprise scale?'
@@ -52,6 +52,21 @@ test('generateLocalCueCard produces complete grounded pitch cue card', () => {
   assert.ok(cueCard.relevantSlideId);
   assert.ok(cueCard.objectionDefuser);
   assert.ok(cueCard.confidence >= 70);
+
+  // Assert Tri-Part Sales Guidance System
+  assert.ok(cueCard.timingCue);
+  assert.ok(cueCard.timingCue.whenToSpeak);
+  assert.ok(cueCard.timingCue.conversationPhase);
+  assert.ok(cueCard.timingCue.urgencyLevel);
+
+  assert.ok(cueCard.deliveryGuidance);
+  assert.ok(cueCard.deliveryGuidance.tone);
+  assert.ok(cueCard.deliveryGuidance.pacing);
+  assert.equal(Array.isArray(cueCard.deliveryGuidance.emphasisKeywords), true);
+  assert.equal(cueCard.deliveryGuidance.emphasisKeywords.length > 0, true);
+
+  assert.ok(cueCard.followUpQuestion);
+  assert.equal(typeof cueCard.followUpQuestion, 'string');
 });
 
 test('getFastTranslation delivers target translation in selected language', () => {

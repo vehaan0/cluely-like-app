@@ -1,0 +1,20 @@
+{
+  "id": "/",
+  "name": "SAM - AI Sales Copilot",
+  "short_name": "SAM Copilot",
+  "description": "Real-time AI sales copilot providing verbatim pitch cue cards, live bilingual translation, and product knowledge base guidance.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#07080c",
+  "theme_color": "#07080c",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

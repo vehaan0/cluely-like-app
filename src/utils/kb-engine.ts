@@ -32,6 +32,17 @@ export interface CopilotCueCard {
   id: string;
   triggerTranscript: string;
   verbatimAnswer: string;
+  deliveryGuidance: {
+    tone: string;
+    pacing: string;
+    emphasisKeywords: string[];
+  };
+  timingCue: {
+    whenToSpeak: string;
+    conversationPhase: 'discovery' | 'objection-defusal' | 'technical-qualification' | 'commercial-closing';
+    urgencyLevel: 'high' | 'medium' | 'calm';
+  };
+  followUpQuestion: string;
   talkingPoints: string[];
   relevantSlideId: string;
   relevantSlideTitle: string;
@@ -349,31 +360,101 @@ export function generateLocalCueCard(
   // Domain-crafted pitch response based on matched category
   let verbatimAnswer = '';
   let objectionDefuser = '';
+  let followUpQuestion = '';
+  let deliveryGuidance = {
+    tone: 'Confident, calm & consultative',
+    pacing: 'Steady conversational pace; pause after core claims',
+    emphasisKeywords: ['guaranteed SLA', 'zero data retention'],
+  };
+  let timingCue: CopilotCueCard['timingCue'] = {
+    whenToSpeak: 'Speak immediately after counterparty completes thought',
+    conversationPhase: 'discovery',
+    urgencyLevel: 'medium',
+  };
 
   if (doc.category === 'pricing') {
     verbatimAnswer = `Our pricing is structured with complete transparency to scale alongside your usage. Our Enterprise Pro plan starts at $4,800 monthly with 5 million executions and guaranteed 99.99% uptime. Furthermore, if you commit annually, we offer a 20% discount, and your initial 30-day proof-of-concept fee is credited 100% directly toward your contract.`;
     objectionDefuser = `Remind the client that unlike legacy iPaaS providers, we never charge penalizing per-step overage fees.`;
+    followUpQuestion = `Given your expected workflow volume this quarter, would our 100% credited POC make it easy for your executive sponsor to approve the pilot?`;
+    deliveryGuidance = {
+      tone: 'Assured, transparent & consultative',
+      pacing: 'Measured and unhurried; take a full 1-second pause after stating $4,800/mo',
+      emphasisKeywords: ['100% credited toward contract', 'no per-step penalties', '20% annual discount'],
+    };
+    timingCue = {
+      whenToSpeak: 'Speak without hesitation — delayed pricing answers signal uncertainty or hidden fees',
+      conversationPhase: 'commercial-closing',
+      urgencyLevel: 'high',
+    };
   } else if (doc.category === 'security') {
     verbatimAnswer = `Security and regulatory governance are at the bedrock of ${kb.name}. We are certified SOC2 Type II, ISO 27001, HIPAA, and GDPR compliant. Crucially, we enforce a strict Zero Data Retention policy—your LLM prompts and payloads are purged immediately upon execution. We also support BYOK AES-256 encryption and full Okta SSO with SCIM provisioning.`;
     objectionDefuser = `Offer to sign an enterprise BAA or provide our latest third-party SOC2 auditor report under mutual NDA.`;
+    followUpQuestion = `Would sharing our third-party SOC2 Type II audit report directly with your InfoSec lead clear the path for architectural review?`;
+    deliveryGuidance = {
+      tone: 'Firm, authoritative, reassuring & unshakeable',
+      pacing: 'Steady, crisp cadence; emphasize Zero Data Retention clearly',
+      emphasisKeywords: ['Zero Data Retention', 'purged immediately', 'isolated VPC', 'SOC2 Type II'],
+    };
+    timingCue = {
+      whenToSpeak: 'Speak immediately — hesitation on compliance triggers InfoSec red flags',
+      conversationPhase: 'technical-qualification',
+      urgencyLevel: 'high',
+    };
   } else if (doc.category === 'architecture') {
     verbatimAnswer = `Under the hood, our architecture utilizes isolated microVMs with sub-15ms cold start times, scaling effortlessly to 250,000 concurrent agent threads. You can deploy directly into your private AWS or Google Cloud VPC via Helm chart, or run completely air-gapped on your internal Kubernetes infrastructure.`;
     objectionDefuser = `Emphasize that they maintain 100% control over their VPC data boundary and private network traffic.`;
+    followUpQuestion = `Does your infrastructure require on-prem air-gapped Kubernetes, or is an isolated cloud VPC your standard deployment pattern?`;
+    deliveryGuidance = {
+      tone: 'Technically precise, crisp & confident',
+      pacing: 'Energetic on performance metrics (<15ms, 250k threads)',
+      emphasisKeywords: ['isolated microVMs', 'sub-15ms cold starts', 'private VPC', 'air-gapped'],
+    };
+    timingCue = {
+      whenToSpeak: 'Speak as soon as they finish technical query; validate their scale first',
+      conversationPhase: 'technical-qualification',
+      urgencyLevel: 'medium',
+    };
   } else if (doc.category === 'competitors') {
     verbatimAnswer = `Compared to legacy platforms like Workato or MuleSoft, our customers see an average 60% reduction in total cost of ownership. More importantly, we provide native multi-agent reasoning, state checkpoints, and automated rollback workflows that legacy tools simply cannot support.`;
     objectionDefuser = `Highlight that our automated migration toolkit can import up to 90% of their existing workflows in under 48 hours.`;
+    followUpQuestion = `How many hours of engineering maintenance is your team losing each week troubleshooting brittle connectors in your current setup?`;
+    deliveryGuidance = {
+      tone: 'Assertive, factual & focused on ROI',
+      pacing: 'Pause slightly after the 60% TCO figure to let the financial savings sink in',
+      emphasisKeywords: ['60% lower TCO', 'native multi-agent reasoning', '48-hour automated migration'],
+    };
+    timingCue = {
+      whenToSpeak: 'Acknowledge their existing tool respectfully, then pivot directly to architectural superiority',
+      conversationPhase: 'objection-defusal',
+      urgencyLevel: 'high',
+    };
   } else if (doc.category === 'integration') {
     verbatimAnswer = `We offer 180+ native enterprise connectors out of the box for SAP S/4HANA, Salesforce, ServiceNow, and Snowflake. In addition, your engineering team can write bespoke connectors in TypeScript or Python using our SDK with zero-downtime hot reloading.`;
     objectionDefuser = `Confirm that our bidirectional webhooks automatically handle third-party rate limits with exponential backoff.`;
+    followUpQuestion = `Beyond Salesforce and Snowflake, are there custom internal REST or GraphQL services you would want to connect during the initial sprint?`;
+    deliveryGuidance = {
+      tone: 'Collaborative, practical & developer-friendly',
+      pacing: 'Conversational and reassuring',
+      emphasisKeywords: ['180+ native connectors', 'zero-downtime hot reloading', 'exponential backoff'],
+    };
+    timingCue = {
+      whenToSpeak: 'Speak right away to remove doubt on connector support',
+      conversationPhase: 'discovery',
+      urgencyLevel: 'medium',
+    };
   } else {
     verbatimAnswer = `${kb.name} solves this directly. Our platform combines enterprise reliability, guaranteed sub-15ms latency, and turnkey integration into your existing systems with full compliance out of the box.`;
     objectionDefuser = `Lead with our 30-day proof-of-concept guarantee to demonstrate immediate time-to-value.`;
+    followUpQuestion = `What is the single most critical workflow outcome your team needs to achieve in the next 60 days?`;
   }
 
   return {
     id: `cue-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     triggerTranscript: userSpeechOrQuery,
     verbatimAnswer,
+    deliveryGuidance,
+    timingCue,
+    followUpQuestion,
     talkingPoints: doc.keyFacts.slice(0, 3),
     relevantSlideId: slide.id,
     relevantSlideTitle: slide.title,

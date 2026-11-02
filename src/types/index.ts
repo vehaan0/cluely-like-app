@@ -19,5 +19,18 @@ export type {
   GeneratedPresentation,
 } from '../utils/presentation-generator';
 
-export type ActiveTab = 'meet' | 'generator' | 'kb' | 'deck';
-export type HudMode = 'docked-right' | 'top-teleprompter' | 'minimal-notch';
+export type ActiveTab = 'hud' | 'generator' | 'kb' | 'providers';
+export type HudMode = 'docked-full' | 'teleprompter-notch' | 'compact-sidebar';
+
+export type AIProviderType = 'gemini' | 'openrouter' | 'ollama' | 'lmstudio' | 'local-engine';
+
+export interface AIProviderConfig {
+  activeProvider: AIProviderType;
+  geminiModel: string;
+  openRouterModel: string;
+  ollamaEndpoint: string;
+  ollamaModel: string;
+  lmStudioEndpoint: string;
+  lmStudioModel: string;
+  temperature: number;
+}

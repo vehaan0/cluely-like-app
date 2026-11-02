@@ -12,10 +12,10 @@ import {
   X,
   Upload,
   Layers,
-  ArrowUpRight,
-  FileCheck,
-  FileCode,
   Sparkles,
+  FileSpreadsheet,
+  Presentation,
+  Check,
 } from 'lucide-react';
 
 interface KnowledgeBaseEditorProps {
@@ -48,6 +48,7 @@ export const KnowledgeBaseEditor: React.FC<KnowledgeBaseEditorProps> = ({
   const [ingestFileName, setIngestFileName] = useState('');
   const [ingestCategory, setIngestCategory] = useState<KBDocument['category']>('security');
   const [isParsingIngest, setIsParsingIngest] = useState(false);
+  const [autoGenSlide, setAutoGenSlide] = useState(true);
 
   const activeDoc = knowledgeBase.documents.find((d) => d.id === activeDocId) || knowledgeBase.documents[0];
 
@@ -59,6 +60,23 @@ export const KnowledgeBaseEditor: React.FC<KnowledgeBaseEditorProps> = ({
       doc.keyFacts.some((f) => f.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesCategory && matchesSearch;
   });
+
+  const getFormatBadge = (title: string, category: string) => {
+    const t = title.toLowerCase();
+    if (t.includes('.pdf') || t.includes('audit') || t.includes('soc2') || t.includes('compliance')) {
+      return { label: 'PDF Spec', color: 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30' };
+    }
+    if (t.includes('.docx') || t.includes('agreement') || t.includes('contract') || t.includes('sla')) {
+      return { label: 'Word Doc', color: 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30' };
+    }
+    if (t.includes('.xlsx') || t.includes('.csv') || t.includes('pricing') || t.includes('benchmark')) {
+      return { label: 'Sheet / Data', color: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30' };
+    }
+    if (t.includes('.pptx') || t.includes('.ppt') || t.includes('presentation') || t.includes('deck')) {
+      return { label: 'Slide Deck', color: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30' };
+    }
+    return { label: 'Verified Spec', color: 'bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-white/10' };
+  };
 
   const handleStartEdit = (doc: KBDocument) => {
     setEditTitle(doc.title);
@@ -110,7 +128,7 @@ export const KnowledgeBaseEditor: React.FC<KnowledgeBaseEditorProps> = ({
               title: editTitle,
               category: editCategory,
               content: editContent,
-              keyFacts: facts,
+              keyFacts: facts.length > 0 ? facts : d.keyFacts,
               suggestedSlideId: editSlideId,
               lastUpdated: new Date().toISOString().split('T')[0],
             }
@@ -121,20 +139,31 @@ export const KnowledgeBaseEditor: React.FC<KnowledgeBaseEditorProps> = ({
     }
   };
 
-  const handleDeleteDoc = (id: string) => {
+  const handleDeleteDoc = (docId: string) => {
     if (knowledgeBase.documents.length <= 1) return;
-    const updatedDocs = knowledgeBase.documents.filter((d) => d.id !== id);
+    const updatedDocs = knowledgeBase.documents.filter((d) => d.id !== docId);
     onUpdateKnowledgeBase({ ...knowledgeBase, documents: updatedDocs });
-    if (activeDocId === id) {
+    if (activeDocId === docId) {
       setActiveDocId(updatedDocs[0]?.id || '');
     }
   };
 
-  // Ingestion logic
+  // Multi-format file upload handler
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setIngestFileName(file.name);
+
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (ext === 'pdf') {
+      setIngestCategory('security');
+    } else if (ext === 'docx' || ext === 'doc') {
+      setIngestCategory('security');
+    } else if (ext === 'xlsx' || ext === 'csv') {
+      setIngestCategory('pricing');
+    } else if (ext === 'pptx' || ext === 'ppt') {
+      setIngestCategory('architecture');
+    }
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -146,38 +175,58 @@ export const KnowledgeBaseEditor: React.FC<KnowledgeBaseEditorProps> = ({
     reader.readAsText(file);
   };
 
-  const handleApplyPresetIngestion = (presetType: 'hipaa' | 'latency' | 'shopify') => {
-    if (presetType === 'hipaa') {
-      setIngestFileName('HIPAA_Healthcare_Compliance_Addendum.md');
+  // Ingestion Presets for PDF, Word, Spreadsheets, and PPT
+  const handleApplyPresetIngestion = (presetType: 'pdf_audit' | 'word_sla' | 'sheet_pricing' | 'ppt_pitch') => {
+    if (presetType === 'pdf_audit') {
+      setIngestFileName('SOC2_Type_II_Compliance_Audit.pdf');
       setIngestCategory('security');
-      setIngestRawText(`# Healthcare & HIPAA Regulatory Security Addendum
+      setIngestRawText(`# SOC 2 Type II & FedRAMP High Compliance Certification (PDF)
 
-OmniFlow AI executes healthcare workflow payloads with guaranteed BAA protection.
-Key Compliance Guarantees:
-• Zero PHI retention: patient identifiers and health records are processed in ephemeral memory and discarded in 0ms.
-• Dedicated single-tenant VPC isolation with HITRUST CSF validation.
-• End-to-end encryption with customer-controlled KMS keys and hardware security modules (HSM).
-• Audit logging retained in tamper-proof WORM storage for 7 years.`);
-    } else if (presetType === 'latency') {
-      setIngestFileName('Sub10ms_Global_Edge_Performance_Whitepaper.txt');
-      setIngestCategory('architecture');
-      setIngestRawText(`# Global Edge Routing & Sub-10ms Inference Benchmarks
+Auditor: Ernst & Young LLP | Certification Date: 2026-Q1
+Scope: Security, Availability, Processing Integrity, and Confidentiality.
 
-Performance metrics tested across 45 edge regions:
-• P95 cold start latency: 8.4 milliseconds using Firecracker microVM isolates.
-• Zero-lock actor fabric supporting 450,000 parallel transactional webhooks.
-• Dynamic failover between Frankfurt, Tokyo, and N. Virginia within 120ms without dropped packets.
-• Direct fiber cross-connect with AWS Direct Connect and Google Cloud Interconnect.`);
+Executive Audit Findings:
+• Zero Critical Vulnerabilities: 100% of tested controls passed without exception.
+• Customer Data Encryption: AES-256 at rest, TLS 1.3 with Perfect Forward Secrecy in transit.
+• Data Residency Guarantee: Complete isolated VPC in Frankfurt, Tokyo, or Virginia with zero cross-border telemetry.
+• BAA Healthcare Ready: Guaranteed HIPAA Business Associate Agreement signed within 24 hours.
+• Disaster Recovery: RPO < 1 second, RTO < 30 seconds with automatic multi-cloud replication.`);
+    } else if (presetType === 'word_sla') {
+      setIngestFileName('Enterprise_Master_Service_Agreement_SLA.docx');
+      setIngestCategory('security');
+      setIngestRawText(`# Enterprise Master Service Agreement & 99.99% SLA (DOCX)
+
+Legal Terms & Liability Indemnification Addendum:
+• 99.99% Financial Uptime Guarantee: 10% credit for every 30 minutes under 99.99% SLA.
+• $5,000,000 Uncapped IP Indemnification: Complete customer indemnity against third-party patent and copyright claims.
+• 30-Day Risk-Free POC Credit: Full reimbursement if sub-10ms performance SLA is not met during sandbox evaluation.
+• 24/7/365 Dedicated Slack/Teams Engineering Bridge with 15-minute P1 response time.`);
+    } else if (presetType === 'sheet_pricing') {
+      setIngestFileName('Enterprise_Pricing_Tier_Matrix.xlsx');
+      setIngestCategory('pricing');
+      setIngestRawText(`# Enterprise Pricing & Competitor Comparison Matrix (XLSX)
+
+Tier | Monthly Price | Execution Quota | Cost Per Extra 10k Executions | SLA | Support
+Starter | $4,500/mo | 500,000 | $12.00 | 99.9% | Business Hours
+Growth | $9,500/mo | 2,500,000 | $8.00 | 99.95% | 24/7 Slack
+Enterprise | $19,500/mo | Unlimited VPC | $0 (Flat Rate) | 99.99% | Dedicated CSM
+
+Commercial Incentives:
+• 20% annual upfront commitment discount across all plans.
+• Zero data egress fee: No surcharge on API tokens, audio streaming, or model calls.
+• 40% more cost-effective than Workato and MuleSoft enterprise tiers.`);
     } else {
-      setIngestFileName('Retail_ERP_Connector_Specs.md');
-      setIngestCategory('integration');
-      setIngestRawText(`# OmniFlow Enterprise Retail & ERP Connectors
+      setIngestFileName('OmniFlow_Executive_Product_Architecture.pptx');
+      setIngestCategory('architecture');
+      setIngestRawText(`# OmniFlow Global Event Architecture & Scalability (PPTX)
 
-Out-of-the-box support for large retail stacks:
-• Turnkey connectors for SAP S/4HANA, Shopify Plus, NetSuite, and Salesforce Commerce Cloud.
-• Bidirectional sync handles up to 80,000 orders/minute during Black Friday / Cyber Monday.
-• Automatic rate limiting backoff and dead-letter queue re-drive guarantees zero dropped orders.
-• Native support for custom Python and TypeScript middleware plugins.`);
+Slide 1: Global Edge Routing Fabric
+• 45 global edge PoPs with sub-10ms P95 round-trip execution latency.
+• Zero-lock actor concurrency handles 450,000 simultaneous webhook triggers.
+
+Slide 2: Enterprise Integration Ecosystem
+• Native 2-way sync connectors for Salesforce, SAP S/4HANA, Snowflake, and ServiceNow.
+• Microsecond data transforms using sandboxed WASM compute.`);
     }
   };
 
@@ -199,8 +248,18 @@ Out-of-the-box support for large retail stacks:
       if (response.ok) {
         const data = await response.json();
         if (data.document) {
-          const updated = [data.document, ...knowledgeBase.documents];
-          onUpdateKnowledgeBase({ ...knowledgeBase, documents: updated });
+          let updatedSlides = knowledgeBase.slides;
+          if (autoGenSlide && data.generatedSlide) {
+            updatedSlides = [...knowledgeBase.slides, data.generatedSlide];
+          }
+
+          const updatedDocs = [data.document, ...knowledgeBase.documents];
+          onUpdateKnowledgeBase({
+            ...knowledgeBase,
+            documents: updatedDocs,
+            slides: updatedSlides,
+          });
+
           setActiveDocId(data.document.id);
           setIsIngestingModalOpen(false);
           setIngestRawText('');
@@ -218,9 +277,9 @@ Out-of-the-box support for large retail stacks:
     const title =
       lines[0]?.replace(/^#+\s*/, '') ||
       ingestFileName.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ') ||
-      'Ingested Product Document';
+      'Ingested Product Specification';
     const keyFacts = lines
-      .filter((l) => /^[-*•]|\d|%|\$|SLA|SOC|API|BAA/i.test(l))
+      .filter((l) => /^[-*•]|\d|%|\$|SLA|SOC|API|BAA|AES|VPC/i.test(l))
       .slice(0, 4)
       .map((l) => l.replace(/^[-*•]\s*/, ''));
 
@@ -229,7 +288,7 @@ Out-of-the-box support for large retail stacks:
       title,
       category: ingestCategory,
       content: ingestRawText,
-      keyFacts: keyFacts.length > 0 ? keyFacts : [title, 'Ingested knowledge specification'],
+      keyFacts: keyFacts.length > 0 ? keyFacts : [title, 'Verified knowledge specification'],
       lastUpdated: new Date().toISOString().split('T')[0],
       suggestedSlideId: slides[0]?.id,
     };
@@ -244,144 +303,181 @@ Out-of-the-box support for large retail stacks:
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
+    <div className="max-w-[1600px] w-full mx-auto px-4 lg:px-8 py-6 pb-24 md:pb-8 flex flex-col gap-6">
       {/* Top Banner / Knowledge Base Overview */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-800">
+      <div className="glass-panel rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-xs text-amber-400 font-semibold tracking-wide uppercase">
+          <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400 font-semibold tracking-wide uppercase">
             <BookOpen className="w-4 h-4" />
             <span>Product Knowledge Base Ingestion System</span>
-            <span className="text-slate-600">·</span>
-            <span className="text-slate-400 normal-case font-normal">{knowledgeBase.documents.length} verified documents</span>
+            <span className="text-slate-400">·</span>
+            <span className="text-slate-600 dark:text-slate-400 normal-case font-mono">{knowledgeBase.documents.length} verified documents</span>
           </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight mt-1">{knowledgeBase.name}</h1>
-          <p className="text-sm text-slate-400 mt-0.5">{knowledgeBase.tagline}</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight mt-1">{knowledgeBase.name}</h1>
+          <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">{knowledgeBase.tagline}</p>
         </div>
 
         <div className="flex items-center gap-3">
           <button
             onClick={() => setIsIngestingModalOpen(true)}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium text-xs rounded-lg transition-colors flex items-center gap-2 border border-slate-700 shadow-sm"
+            className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white dark:bg-white/[0.08] dark:hover:bg-white/[0.15] dark:text-white font-semibold text-xs rounded-xl transition-all flex items-center gap-2 border border-slate-700 dark:border-white/10 shadow-sm cursor-pointer"
           >
-            <Upload className="w-4 h-4 text-amber-400" />
-            <span>Ingest Document / Spec</span>
+            <Upload className="w-4 h-4 text-amber-500 dark:text-amber-400" />
+            <span>Ingest Document (PDF, Word, Sheet, PPT)</span>
           </button>
 
           <button
             onClick={handleStartCreate}
-            className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs rounded-lg transition-colors flex items-center gap-2 shadow-sm"
+            className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs rounded-xl transition-all flex items-center gap-2 shadow-sm cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>Add Manual Doc</span>
+            <span>Add Manual Spec</span>
           </button>
         </div>
       </div>
 
-      {/* Ingestion Modal */}
+      {/* Multi-Format Ingestion Modal */}
       {isIngestingModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div className="flex items-center gap-2 text-sm font-bold text-white">
-                <Upload className="w-4 h-4 text-amber-400" />
-                <span>Ingest Document, FAQ or Product Specification</span>
+          <div className="bg-white dark:bg-[#0c0e17] border border-slate-200 dark:border-white/10 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10">
+              <div className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+                <Upload className="w-4 h-4 text-amber-500" />
+                <span>Ingest Document, PDF, Word, Sheet or Presentation</span>
               </div>
               <button
                 onClick={() => setIsIngestingModalOpen(false)}
-                className="p-1 rounded text-slate-400 hover:text-white"
+                className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Quick Templates */}
+            {/* Quick 1-Click Multi-Format Templates */}
             <div>
-              <div className="text-xs text-slate-400 mb-1.5 font-medium">Quick Sample Ingest Templates:</div>
-              <div className="flex flex-wrap gap-2 text-xs">
+              <div className="text-xs text-slate-600 dark:text-slate-400 mb-2 font-semibold">
+                Quick Sample Multi-Format Ingestion Presets:
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                 <button
-                  onClick={() => handleApplyPresetIngestion('hipaa')}
-                  className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                  onClick={() => handleApplyPresetIngestion('pdf_audit')}
+                  className="p-2.5 rounded-xl bg-slate-50 dark:bg-white/[0.04] hover:bg-slate-100 dark:hover:bg-white/[0.08] text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-white/10 text-left transition-colors cursor-pointer"
                 >
-                  Healthcare HIPAA Addendum
+                  <div className="font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1.5 mb-1">
+                    <FileText className="w-3.5 h-3.5" /> 📕 PDF
+                  </div>
+                  <div className="text-[11px] text-slate-500 truncate">SOC2 Audit Report</div>
                 </button>
+
                 <button
-                  onClick={() => handleApplyPresetIngestion('latency')}
-                  className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                  onClick={() => handleApplyPresetIngestion('word_sla')}
+                  className="p-2.5 rounded-xl bg-slate-50 dark:bg-white/[0.04] hover:bg-slate-100 dark:hover:bg-white/[0.08] text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-white/10 text-left transition-colors cursor-pointer"
                 >
-                  Global Edge Performance Specs
+                  <div className="font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1.5 mb-1">
+                    <FileText className="w-3.5 h-3.5" /> 📘 Word
+                  </div>
+                  <div className="text-[11px] text-slate-500 truncate">Master SLA Contract</div>
                 </button>
+
                 <button
-                  onClick={() => handleApplyPresetIngestion('shopify')}
-                  className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                  onClick={() => handleApplyPresetIngestion('sheet_pricing')}
+                  className="p-2.5 rounded-xl bg-slate-50 dark:bg-white/[0.04] hover:bg-slate-100 dark:hover:bg-white/[0.08] text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-white/10 text-left transition-colors cursor-pointer"
                 >
-                  Retail & ERP Specs
+                  <div className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 mb-1">
+                    <FileSpreadsheet className="w-3.5 h-3.5" /> 📊 Sheet
+                  </div>
+                  <div className="text-[11px] text-slate-500 truncate">Pricing Matrix</div>
+                </button>
+
+                <button
+                  onClick={() => handleApplyPresetIngestion('ppt_pitch')}
+                  className="p-2.5 rounded-xl bg-slate-50 dark:bg-white/[0.04] hover:bg-slate-100 dark:hover:bg-white/[0.08] text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-white/10 text-left transition-colors cursor-pointer"
+                >
+                  <div className="font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5 mb-1">
+                    <Presentation className="w-3.5 h-3.5" /> 📙 PPT
+                  </div>
+                  <div className="text-[11px] text-slate-500 truncate">Architecture Deck</div>
                 </button>
               </div>
             </div>
 
             {/* File Upload Box */}
-            <div className="border-2 border-dashed border-slate-700 hover:border-amber-500/50 rounded-xl p-4 text-center cursor-pointer bg-slate-950/50 transition-colors">
+            <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-amber-500 rounded-xl p-4 text-center cursor-pointer bg-slate-50/60 dark:bg-black/30 transition-colors">
               <input
                 type="file"
                 id="file-upload"
-                accept=".txt,.md,.json,.csv"
+                accept=".txt,.md,.json,.csv,.pdf,.docx,.doc,.xlsx,.pptx,.ppt"
                 onChange={handleFileUpload}
                 className="hidden"
               />
               <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center">
-                <FileCode className="w-8 h-8 text-amber-400 mb-1" />
-                <span className="text-xs font-semibold text-white">
-                  {ingestFileName ? ingestFileName : 'Click to upload or drag & drop .txt, .md, .json'}
+                <Upload className="w-8 h-8 text-amber-500 mb-1" />
+                <span className="text-xs font-semibold text-slate-900 dark:text-white">
+                  {ingestFileName ? ingestFileName : 'Click to upload or drag & drop (PDF, Word, Excel, PPT, CSV, Markdown)'}
                 </span>
                 <span className="text-[11px] text-slate-500 mt-0.5">
-                  Knowledge engine will automatically chunk and extract key facts
+                  Knowledge engine automatically chunks tabular metrics and generates presentation slides
                 </span>
               </label>
             </div>
 
             {/* Category select */}
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">Target Category</label>
-              <select
-                value={ingestCategory}
-                onChange={(e) => setIngestCategory(e.target.value as any)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
-              >
-                <option value="security">Security & Compliance</option>
-                <option value="architecture">Architecture & Infrastructure</option>
-                <option value="pricing">Pricing & Commercial</option>
-                <option value="integration">Integrations & Connectors</option>
-                <option value="competitors">Competitor Battlecards</option>
-                <option value="faq">FAQ</option>
-              </select>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Target Category</label>
+                <select
+                  value={ingestCategory}
+                  onChange={(e) => setIngestCategory(e.target.value as any)}
+                  className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                >
+                  <option value="security">Security & Compliance</option>
+                  <option value="architecture">Architecture & Infrastructure</option>
+                  <option value="pricing">Pricing & Commercial</option>
+                  <option value="integration">Integrations & Connectors</option>
+                  <option value="competitors">Competitor Battlecards</option>
+                  <option value="faq">FAQ</option>
+                </select>
+              </div>
+
+              <div className="flex items-center pt-5">
+                <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoGenSlide}
+                    onChange={(e) => setAutoGenSlide(e.target.checked)}
+                    className="rounded border-slate-300 text-amber-500 focus:ring-amber-500"
+                  />
+                  <span>Auto-generate Pitch Slide from Document</span>
+                </label>
+              </div>
             </div>
 
             {/* Raw Text Content */}
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                Document Content / Text to Ingest
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Extracted Document Content / Text to Ingest
               </label>
               <textarea
                 rows={6}
                 value={ingestRawText}
                 onChange={(e) => setIngestRawText(e.target.value)}
                 placeholder="Paste markdown, text, bullet points, or product specifications..."
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-white font-mono leading-relaxed focus:outline-none focus:border-amber-400"
+                className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl p-3 text-xs text-slate-900 dark:text-white font-mono leading-relaxed focus:outline-none focus:border-amber-500"
               />
             </div>
 
             {/* Action buttons */}
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-white/10">
               <button
                 onClick={() => setIsIngestingModalOpen(false)}
-                className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white text-xs font-medium"
+                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-white/[0.05] text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/[0.1] text-xs font-medium cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={handleExecuteIngestion}
                 disabled={!ingestRawText.trim() || isParsingIngest}
-                className="px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
+                className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-bold flex items-center gap-1.5 disabled:opacity-50 cursor-pointer shadow-sm"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>{isParsingIngest ? 'Ingesting...' : 'Ingest into Knowledge Base'}</span>
@@ -392,18 +488,18 @@ Out-of-the-box support for large retail stacks:
       )}
 
       {/* Main Grid: Document List on Left, Viewer/Editor on Right */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Filter and Doc List */}
         <div className="lg:col-span-5 flex flex-col gap-4">
           {/* Search bar */}
           <div className="relative">
-            <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
             <input
               type="text"
               placeholder="Search documents, facts, specs..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400/70"
+              className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl pl-9 pr-3 py-2.5 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-amber-500"
             />
           </div>
 
@@ -413,10 +509,10 @@ Out-of-the-box support for large retail stacks:
               <button
                 key={cat}
                 onClick={() => setSelectedCategory(cat)}
-                className={`px-2.5 py-1 rounded-md capitalize whitespace-nowrap transition-colors ${
+                className={`px-3 py-1.5 rounded-lg capitalize whitespace-nowrap transition-colors cursor-pointer ${
                   selectedCategory === cat
-                    ? 'bg-slate-800 text-amber-400 font-medium border border-amber-400/30'
-                    : 'text-slate-400 hover:text-white bg-slate-950 border border-slate-900'
+                    ? 'bg-amber-500/20 text-slate-900 dark:text-amber-300 font-bold border border-amber-500/40 shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-white/[0.03] border border-slate-200 dark:border-white/[0.06]'
                 }`}
               >
                 {cat}
@@ -425,9 +521,10 @@ Out-of-the-box support for large retail stacks:
           </div>
 
           {/* Doc List Items */}
-          <div className="space-y-2 max-h-[640px] overflow-y-auto pr-1">
+          <div className="space-y-2.5 max-h-[640px] overflow-y-auto pr-1">
             {filteredDocs.map((doc) => {
               const isSelected = doc.id === activeDoc?.id && !isCreatingNew;
+              const badge = getFormatBadge(doc.title, doc.category);
               return (
                 <div
                   key={doc.id}
@@ -436,29 +533,35 @@ Out-of-the-box support for large retail stacks:
                     setIsCreatingNew(false);
                     setIsEditing(false);
                   }}
-                  className={`p-3.5 rounded-lg border cursor-pointer transition-all ${
+                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
                     isSelected
-                      ? 'bg-slate-900 border-amber-500/50 ring-1 ring-amber-500/20'
-                      : 'bg-slate-950/80 border-slate-800 hover:border-slate-700 hover:bg-slate-900/50'
+                      ? 'bg-white dark:bg-white/[0.08] border-amber-500/50 shadow-md ring-2 ring-amber-500/20'
+                      : 'bg-white/80 dark:bg-black/30 border-slate-200/90 dark:border-white/[0.06] hover:border-amber-400/40'
                   }`}
                 >
-                  <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-                    <span className="font-medium text-amber-400 uppercase text-[10px] tracking-wider">
-                      {doc.category}
-                    </span>
-                    <span className="font-mono text-[11px]">{doc.lastUpdated}</span>
+                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold text-amber-600 dark:text-amber-400 uppercase text-[10px] tracking-wider">
+                        {doc.category}
+                      </span>
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border ${badge.color}`}>
+                        {badge.label}
+                      </span>
+                    </div>
+                    <span className="font-mono text-[11px] tabular-nums">{doc.lastUpdated}</span>
                   </div>
-                  <h3 className="text-sm font-semibold text-white leading-snug">{doc.title}</h3>
-                  <p className="text-xs text-slate-400 line-clamp-2 mt-1">{doc.content}</p>
 
-                  <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-800/60 text-[11px] text-slate-400">
-                    <span className="flex items-center gap-1 text-emerald-400">
-                      <CheckCircle2 className="w-3 h-3" /> {doc.keyFacts.length} Verified Facts
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white leading-snug">{doc.title}</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-1">{doc.content}</p>
+
+                  <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-100 dark:border-white/[0.06] text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> {doc.keyFacts.length} Verified Facts
                     </span>
                     {doc.suggestedSlideId && (
                       <>
                         <span>·</span>
-                        <span className="text-slate-400">Linked to Slide</span>
+                        <span className="text-slate-400">Linked to Pitch Slide</span>
                       </>
                     )}
                   </div>
@@ -467,7 +570,7 @@ Out-of-the-box support for large retail stacks:
             })}
 
             {filteredDocs.length === 0 && (
-              <div className="p-8 text-center bg-slate-950 border border-slate-800 rounded-lg text-slate-400 text-xs">
+              <div className="p-8 text-center bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-xl text-slate-500 text-xs">
                 No documents found matching "{searchQuery}".
               </div>
             )}
@@ -475,12 +578,12 @@ Out-of-the-box support for large retail stacks:
         </div>
 
         {/* Right Column: Doc Viewer or Form Editor */}
-        <div className="lg:col-span-7 bg-slate-900/90 border border-slate-800 rounded-xl p-6 min-h-[500px]">
+        <div className="lg:col-span-7 glass-panel rounded-2xl p-6 min-h-[540px]">
           {isCreatingNew || isEditing ? (
             /* Editing or Creating Form */
             <div className="space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                <h2 className="text-base font-semibold text-white">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10">
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
                   {isCreatingNew ? 'Feed New Product Knowledge' : `Edit: ${editTitle}`}
                 </h2>
                 <button
@@ -488,30 +591,30 @@ Out-of-the-box support for large retail stacks:
                     setIsEditing(false);
                     setIsCreatingNew(false);
                   }}
-                  className="p-1 rounded text-slate-400 hover:text-white"
+                  className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Document Title</label>
+                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Document Title</label>
                 <input
                   type="text"
                   value={editTitle}
                   onChange={(e) => setEditTitle(e.target.value)}
                   placeholder="e.g. SOC2 Compliance & Data Residency"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
+                  className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Category</label>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Category</label>
                   <select
                     value={editCategory}
                     onChange={(e) => setEditCategory(e.target.value as any)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
+                    className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
                   >
                     <option value="architecture">Architecture</option>
                     <option value="pricing">Pricing</option>
@@ -522,11 +625,11 @@ Out-of-the-box support for large retail stacks:
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Suggested Presentation Slide</label>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Suggested Presentation Slide</label>
                   <select
                     value={editSlideId}
                     onChange={(e) => setEditSlideId(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
+                    className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
                   >
                     {slides.map((s) => (
                       <option key={s.id} value={s.id}>
@@ -538,7 +641,7 @@ Out-of-the-box support for large retail stacks:
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
+                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Full Document Content (Fed into Copilot Reasoning & Presentations)
                 </label>
                 <textarea
@@ -546,12 +649,12 @@ Out-of-the-box support for large retail stacks:
                   value={editContent}
                   onChange={(e) => setEditContent(e.target.value)}
                   placeholder="Detailed technical specifications, pricing rules, guarantees, numbers, or SLA details..."
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-white font-mono leading-relaxed focus:outline-none focus:border-amber-400"
+                  className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl p-3 text-xs text-slate-900 dark:text-white font-mono leading-relaxed focus:outline-none focus:border-amber-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
+                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Key Authoritative Facts (1 per line for quick Copilot citations)
                 </label>
                 <textarea
@@ -559,23 +662,23 @@ Out-of-the-box support for large retail stacks:
                   value={editKeyFacts}
                   onChange={(e) => setEditKeyFacts(e.target.value)}
                   placeholder="Sub-15ms execution latency&#10;SOC2 Type II certified&#10;20% annual commitment discount"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-white font-mono leading-relaxed focus:outline-none focus:border-amber-400"
+                  className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl p-3 text-xs text-slate-900 dark:text-white font-mono leading-relaxed focus:outline-none focus:border-amber-500"
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-white/10">
                 <button
                   onClick={() => {
                     setIsEditing(false);
                     setIsCreatingNew(false);
                   }}
-                  className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white text-xs font-medium"
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-white/[0.05] text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/[0.1] text-xs font-medium cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleSaveDoc}
-                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-semibold flex items-center gap-1.5"
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm"
                 >
                   <Save className="w-3.5 h-3.5" />
                   <span>Save Knowledge Doc</span>
@@ -585,22 +688,22 @@ Out-of-the-box support for large retail stacks:
           ) : activeDoc ? (
             /* Document Preview & Details */
             <div>
-              <div className="flex items-start justify-between pb-4 border-b border-slate-800 gap-4">
+              <div className="flex items-start justify-between pb-4 border-b border-slate-200 dark:border-white/10 gap-4">
                 <div>
-                  <div className="flex items-center gap-2 text-xs text-slate-400">
-                    <span className="font-semibold text-amber-400 uppercase tracking-wider text-[11px]">
+                  <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                    <span className="font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider text-[11px]">
                       {activeDoc.category}
                     </span>
                     <span>·</span>
                     <span className="font-mono">{activeDoc.lastUpdated}</span>
                   </div>
-                  <h2 className="text-xl font-bold text-white mt-1">{activeDoc.title}</h2>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-white mt-1">{activeDoc.title}</h2>
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     onClick={() => handleStartEdit(activeDoc)}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5"
+                    className="px-3 py-1.5 bg-slate-100 dark:bg-white/[0.05] hover:bg-slate-200 dark:hover:bg-white/[0.1] text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 border border-slate-200 dark:border-white/10 cursor-pointer"
                   >
                     <Edit3 className="w-3.5 h-3.5" />
                     <span>Edit</span>
@@ -608,7 +711,7 @@ Out-of-the-box support for large retail stacks:
                   <button
                     onClick={() => handleDeleteDoc(activeDoc.id)}
                     disabled={knowledgeBase.documents.length <= 1}
-                    className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="p-1.5 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-slate-100 dark:hover:bg-white/[0.05] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                     title="Delete document"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -617,14 +720,14 @@ Out-of-the-box support for large retail stacks:
               </div>
 
               {/* Key Facts Strip */}
-              <div className="my-5 p-4 rounded-lg bg-slate-950/80 border border-slate-800">
-                <div className="text-xs font-semibold text-slate-300 uppercase tracking-wide mb-2 flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Grounded Key Facts for Pitching & Presentations
+              <div className="my-5 p-4 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10">
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Grounded Key Facts for Pitching & Presentations
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
                   {activeDoc.keyFacts.map((fact, idx) => (
-                    <div key={idx} className="flex items-start gap-2 text-slate-300">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0" />
+                    <div key={idx} className="flex items-start gap-2 text-slate-700 dark:text-slate-300">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 shrink-0" />
                       <span className="leading-snug">{fact}</span>
                     </div>
                   ))}
@@ -633,10 +736,10 @@ Out-of-the-box support for large retail stacks:
 
               {/* Full Content */}
               <div>
-                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
                   Knowledge Base Content
                 </h3>
-                <div className="bg-slate-950/60 border border-slate-800/80 rounded-lg p-4 text-xs text-slate-300 leading-relaxed font-mono whitespace-pre-wrap">
+                <div className="bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-xl p-4 text-xs text-slate-800 dark:text-slate-200 leading-relaxed font-mono whitespace-pre-wrap">
                   {activeDoc.content}
                 </div>
               </div>
